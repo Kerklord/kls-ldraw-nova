@@ -6,21 +6,27 @@ Build LEGO models with an AI agent, ordinary JSON plans and LDraw parts. The too
 
 ## Quick install
 
-One command checks every requirement, installs what is missing (git, uv, Python 3.12, Poppler, LeoCAD 23.03+, Claude Code), clones the repository, points it at your LDraw library, runs `./setup.sh` and a test build. It asks which repository and folder to use, and where your LDraw parts are. Running it again is safe.
+**Windows.** Download [`Install-LDRAW-NOVA.bat`](https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/Install-LDRAW-NOVA.bat) (right-click, *Save link as*) and double-click it. If Windows warns about a downloaded file, choose *More info* then *Run anyway*. It asks how you want to use LDRAW-NOVA:
 
-**Windows.** Download [`Install-LDRAW-NOVA.bat`](https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/Install-LDRAW-NOVA.bat) (right-click, *Save link as*) and double-click it. If Windows warns about a downloaded file, choose *More info* then *Run anyway*. Folder pickers let you choose your LDraw folder and where to install; the default install location, inside Linux, is fastest. The installer sets up WSL with Ubuntu, installs inside it and adds `LDRAW-NOVA` desktop shortcuts: one opens Claude Code ready to build, the other opens the folder where models appear. Your LDraw folder can stay on `C:\`; it is copied into Linux for speed. If WSL is new, restart when asked, open Ubuntu once to create a user, and double-click the installer again. From PowerShell, the same installer runs with:
+| Mode | What you get | What it installs |
+|---|---|---|
+| **Web app** (default) | A chat page in your browser with a 3D viewer and VR. Sign in to Claude or ChatGPT in the app's Settings and add an agent. | Docker Desktop (via winget), this repository and [ldraw-nova-docker](https://github.com/anteloc/ldraw-nova-docker) in `%USERPROFILE%\LDRAW-NOVA` (or a folder you pick), then builds the app. The first build takes 15 to 40 minutes and about 5 GB; the image brings its own LDraw library. |
+| **Terminal** | Claude Code and/or OpenAI Codex (GPT) in a command window, driving `./ldraw-agent` directly. | WSL with Ubuntu, then everything below inside it, using your own LDraw folder (picked or detected, copied into Linux for speed). |
+| **Both** | Both of the above. | |
+
+Desktop shortcuts: **LDRAW-NOVA** starts the web app and opens it in your browser, **Stop LDRAW-NOVA** stops it, **LDRAW-NOVA models** opens its data folder; terminal mode adds **LDRAW-NOVA Claude (terminal)** and/or **LDRAW-NOVA GPT (terminal)** plus **LDRAW-NOVA files**. If WSL or Docker Desktop is new, the installer tells you when to restart; then double-click it again and it continues. From PowerShell, the same installer runs with:
 
 ```powershell
 irm https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.ps1 | iex
 ```
 
-**macOS, Linux or WSL** (needs Homebrew on macOS):
+**macOS, Linux or WSL** (terminal mode; needs Homebrew on macOS). Checks every requirement and installs what is missing (git, uv, Python 3.12, Poppler, LeoCAD 23.03+, Claude Code and/or Codex), clones the repository, points it at your LDraw library, runs `./setup.sh` and a test build. Running it again is safe.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.sh | bash
 ```
 
-Options such as `--repo original`, `--dir`, `--ldraw PATH` (a folder or `complete.zip`) and `--with-lsynth` skip the questions; see `install.sh --help`. From a cloned copy, run `./install.sh` or `powershell -ExecutionPolicy Bypass -File install.ps1`.
+Options such as `--ai claude|gpt|both`, `--repo original`, `--dir`, `--ldraw PATH` (a folder or `complete.zip`) and `--with-lsynth` skip the questions; see `install.sh --help`. `install.ps1` takes `-Mode web|terminal|both`, `-AI`, `-WebDir`, `-LDraw` and `-Repo`. From a cloned copy, run `./install.sh` or `powershell -ExecutionPolicy Bypass -File install.ps1`.
 
 ## Start locally
 

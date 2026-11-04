@@ -20,7 +20,7 @@ DIR=""
 LDRAW=""
 COPY_LDRAW=""        # yes | no | "" (ask)
 WITH_LSYNTH=no
-INSTALL_CLAUDE=yes
+AI=""                # claude | gpt | both | none ("" = ask, default claude)
 INSTALL_LEOCAD=yes
 RUN_TEST=yes
 ASSUME_YES=no
@@ -36,7 +36,8 @@ Usage: install.sh [options]
   --copy-ldraw               Copy a library on a Windows drive (/mnt/...) into ~/ldraw (faster)
   --no-copy-ldraw            Use the library where it is
   --with-lsynth              Also install flexible-part support (hoses, chains)
-  --no-claude                Skip installing Claude Code
+  --ai claude|gpt|both|none  Which AI to install: Claude Code, OpenAI Codex (GPT), or both
+  --no-claude                Same as --ai none
   --no-leocad                Skip installing LeoCAD
   --skip-test                Skip the bridge test build at the end
                              (exit code 3 means installed, but the test build failed)
@@ -54,7 +55,8 @@ while [ $# -gt 0 ]; do
     --copy-ldraw) COPY_LDRAW=yes; shift ;;
     --no-copy-ldraw) COPY_LDRAW=no; shift ;;
     --with-lsynth) WITH_LSYNTH=yes; shift ;;
-    --no-claude) INSTALL_CLAUDE=no; shift ;;
+    --ai) AI="$2"; shift 2 ;;
+    --no-claude) AI=none; shift ;;
     --no-leocad) INSTALL_LEOCAD=no; shift ;;
     --skip-test) RUN_TEST=no; shift ;;
     -y|--yes) ASSUME_YES=yes; shift ;;
@@ -235,17 +237,58 @@ else
   fi
 fi
 
-# ---------- 4. Claude Code ----------
-step "Checking Claude Code"
-if [ "$INSTALL_CLAUDE" = no ]; then
-  warn "Skipped (--no-claude)"
-elif have claude; then
-  ok "Claude Code $(claude --version 2>/dev/null | head -n1)"
-else
-  curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || die "Claude Code did not install. See https://docs.claude.com/en/docs/claude-code/setup"
-  hash -r 2>/dev/null || true
-  if have claude; then ok "Claude Code installed"; else warn "Claude Code installed; open a new terminal for the 'claude' command"; fi
+# ---------- 4. AI assistant(s) ----------
+if [ -z "$AI" ]; then
+  echo
+  echo "  Which AI should build your models?"
+  echo "  1) Claude (Claude Code; needs a Claude plan or an Anthropic API key)"
+  echo "  2) GPT (OpenAI Codex; needs a ChatGPT plan or an OpenAI API key)"
+  echo "  3) Both"
+  case "$(ask "Choose 1, 2 or 3" 1)" in 2|gpt) AI=gpt ;; 3|both) AI=both ;; *) AI=claude ;; esac
 fi
+case "$AI" in claude|gpt|both|none) ;; *) die "--ai must be claude, gpt, both or none" ;; esac
+
+install_node() { # Node.js LTS into ~/.local/opt/node, no sudo needed
+  local os arch ver dir
+  case "$OS" in Linux) os=linux ;; Darwin) os=darwin ;; esac
+  case "$ARCH" in x86_64|amd64) arch=x64 ;; aarch64|arm64) arch=arm64 ;; *) return 1 ;; esac
+  local index
+  index=$(curl -fsSL https://nodejs.org/dist/index.json) || return 1
+  ver=$(printf '%s\n' "$index" | grep -Eo '"version":"v[0-9.]+"[^}]*"lts":"[^"]+"' | grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+  [ -n "$ver" ] || return 1
+  dir="$HOME/.local/opt/node"
+  rm -rf "$dir"; mkdir -p "$dir"
+  echo "  Downloading Node.js $ver (needed by Codex)"
+  curl -fsSL "https://nodejs.org/dist/$ver/node-$ver-$os-$arch.tar.gz" | tar -xz -C "$dir" --strip-components=1 || return 1
+  ln -sf "$dir/bin/node" "$dir/bin/npm" "$dir/bin/npx" "$LOCAL_BIN/"
+  hash -r 2>/dev/null || true
+}
+
+if [ "$AI" = claude ] || [ "$AI" = both ]; then
+  step "Checking Claude Code"
+  if have claude; then
+    ok "Claude Code $(claude --version 2>/dev/null | head -n1)"
+  else
+    curl -fsSL https://claude.ai/install.sh | bash >/dev/null 2>&1 || die "Claude Code did not install. See https://docs.claude.com/en/docs/claude-code/setup"
+    hash -r 2>/dev/null || true
+    if have claude; then ok "Claude Code installed"; else warn "Claude Code installed; open a new terminal for the 'claude' command"; fi
+  fi
+fi
+if [ "$AI" = gpt ] || [ "$AI" = both ]; then
+  step "Checking OpenAI Codex (GPT)"
+  if have codex; then
+    ok "Codex $(codex --version 2>/dev/null | head -n1)"
+  else
+    nv=$(node --version 2>/dev/null | tr -d v || true)
+    if [ -z "$nv" ] || ! version_ge "$nv" 18; then install_node || die "Could not install Node.js from nodejs.org."; fi
+    # Install into ~/.local so no sudo is needed.
+    npm install -g --silent --prefix "$HOME/.local" @openai/codex >/dev/null 2>&1 || die "npm could not install @openai/codex."
+    hash -r 2>/dev/null || true
+    have codex || die "Codex installed but 'codex' is not on PATH."
+    ok "Codex $(codex --version 2>/dev/null | head -n1)"
+  fi
+fi
+[ "$AI" = none ] && warn "No AI assistant installed (--ai none)"
 
 # ---------- 5. Repository ----------
 step "Getting the ldraw-nova repository"
@@ -393,8 +436,12 @@ if [ "$IS_WSL" = yes ]; then
   have wslpath && echo "  In Windows Explorer: $(wslpath -w "$DIR")"
 fi
 echo
-echo "  Start building:  ${B}cd $DIR && claude${N}"
-echo "  Then describe the model you want. Open a new terminal first if 'claude' is not found."
+case "$AI" in
+  claude) echo "  Start building:  ${B}cd $DIR && claude${N}" ;;
+  gpt)    echo "  Start building:  ${B}cd $DIR && codex${N}" ;;
+  both)   echo "  Start building:  ${B}cd $DIR && claude${N}   (or ${B}codex${N} for GPT)" ;;
+esac
+echo "  Then describe the model you want. Open a new terminal first if the command is not found."
 # Exit 3 = installed but the test build failed (1 = installer error, 2 = bad option).
 [ "$TEST_STATUS" = failed ] && exit 3
 exit 0

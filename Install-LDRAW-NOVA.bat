@@ -5,8 +5,8 @@ title LDRAW-NOVA installer
 echo.
 echo  LDRAW-NOVA installer
 echo  ====================
-echo  This sets up everything needed to build LEGO models with Claude.
-echo  It will ask a few questions and may open folder pickers.
+echo  This sets up everything needed to build LEGO models with Claude or GPT.
+echo  It asks a few questions; the defaults are fine for most people.
 echo.
 if exist "%~dp0install.ps1" (
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" -FromBat %*
