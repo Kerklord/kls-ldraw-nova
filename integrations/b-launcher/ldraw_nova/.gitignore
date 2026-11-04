@@ -1,0 +1,4 @@
+settings.json
+state.json
+*.part
+__pycache__/
