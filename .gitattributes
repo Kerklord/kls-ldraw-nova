@@ -1,2 +1,5 @@
 # MPD examples intentionally retain the specification's CRLF byte endings.
 *.mpd -text whitespace=cr-at-eol
+
+# Windows batch files keep CRLF in the repository so raw downloads run correctly.
+*.bat -text
