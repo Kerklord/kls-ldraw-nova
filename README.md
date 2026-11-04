@@ -4,6 +4,24 @@ Build LEGO models with an AI agent, ordinary JSON plans and LDraw parts. The too
 
 [Watch the demonstration](https://youtu.be/YDjjxGqWpgU) · [Project background](docs/background.md)
 
+## Quick install
+
+One command checks every requirement, installs what is missing (git, uv, Python 3.12, Poppler, LeoCAD 23.03+, Claude Code), clones the repository, points it at your LDraw library, runs `./setup.sh` and a test build. It asks which repository and folder to use, and where your LDraw parts are. Running it again is safe.
+
+**Windows** (PowerShell). Sets up WSL with Ubuntu, then installs inside it and adds `LDRAW-NOVA` desktop shortcuts. Your LDraw folder can stay on `C:\`; it is copied into Linux for speed. If WSL is new, restart when asked, open Ubuntu once to create a user, and run the command again.
+
+```powershell
+irm https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.ps1 | iex
+```
+
+**macOS, Linux or WSL** (needs Homebrew on macOS):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.sh | bash
+```
+
+Options such as `--repo original`, `--dir`, `--ldraw PATH` (a folder or `complete.zip`) and `--with-lsynth` skip the questions; see `install.sh --help`. From a cloned copy, run `./install.sh` or `powershell -ExecutionPolicy Bypass -File install.ps1`.
+
 ## Start locally
 
 You need Python 3.12+, an installed LDraw parts library, Poppler (`pdftotext`) and LeoCAD on `PATH`. The repository includes the reference data and connector metadata used by the tools.
