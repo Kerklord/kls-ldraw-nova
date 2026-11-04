@@ -1,0 +1,28 @@
+{
+  "id": "ldraw_nova",
+  "name": "LDRAW-NOVA",
+  "version": "0.1.0",
+  "author": "KL",
+  "description": "Builds LEGO models with the LDRAW-NOVA web app from a board node and saves the .mpd where you choose. Needs the LDRAW-NOVA web app running (http://localhost:8765 by default). Standard library only.",
+  "entry": "main.py",
+  "permissions": ["node_kinds", "panel", "notify"],
+  "job_timeout": 10800,
+  "retries": 0,
+  "node_kinds": [
+    {
+      "name": "lego_build",
+      "label": "LEGO build",
+      "blurb": "Sends the prompt to LDRAW-NOVA, waits for the model and saves the .mpd. Wire it into Open in program to open it in Stud.io.",
+      "inputs": [{"name": "in", "type": "any", "required": false}],
+      "outputs": [{"name": "mpd", "type": "file"}],
+      "fields": [
+        {"key": "prompt", "label": "Prompt", "kind": "multiline", "default": ""},
+        {"key": "ai", "label": "AI", "kind": "choice", "options": ["Default"], "default": "Default"},
+        {"key": "mode", "label": "Mode", "kind": "choice", "options": ["Build", "Plan only"], "default": "Build"},
+        {"key": "chat", "label": "Chat", "kind": "choice", "options": ["New chat", "Continue this node's chat"], "default": "New chat"},
+        {"key": "output", "label": "Save .mpd as", "kind": "save", "default": ""},
+        {"key": "extras", "label": "Also save snapshot and parts list", "kind": "bool", "default": "yes"}
+      ]
+    }
+  ]
+}
