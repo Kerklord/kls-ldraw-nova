@@ -24,6 +24,7 @@ AI=""                # claude | gpt | both | none ("" = ask, default claude)
 INSTALL_LEOCAD=yes
 RUN_TEST=yes
 ASSUME_YES=no
+ACTION=install       # install | update | revert
 
 usage() {
   cat <<'EOF'
@@ -41,6 +42,8 @@ Usage: install.sh [options]
   --no-leocad                Skip installing LeoCAD
   --skip-test                Skip the bridge test build at the end
                              (exit code 3 means installed, but the test build failed)
+  --update                   Update an existing install (in --dir) to the latest version
+  --revert                   Go back to the version before the last --update
   -y, --yes                  Accept defaults instead of asking
   -h, --help                 Show this help
 EOF
@@ -59,6 +62,8 @@ while [ $# -gt 0 ]; do
     --no-claude) AI=none; shift ;;
     --no-leocad) INSTALL_LEOCAD=no; shift ;;
     --skip-test) RUN_TEST=no; shift ;;
+    --update) ACTION=update; shift ;;
+    --revert) ACTION=revert; shift ;;
     -y|--yes) ASSUME_YES=yes; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -107,6 +112,64 @@ elif have apt-get; then PKG=apt
 elif have dnf; then PKG=dnf
 elif have pacman; then PKG=pacman
 fi
+
+# ---------- update / revert an existing install ----------
+# Versions are the repository's commits. Each update records the commit it left
+# in .git/ldraw-nova-versions, so --revert can return to it (and --update forward again).
+SELF_COPY="$HOME/.local/share/ldraw-nova/install.sh"
+remember_self() { # keep a copy of this installer for the Update/Revert shortcuts
+  local src="${BASH_SOURCE[0]:-}"
+  if [ -n "$src" ] && [ -f "$src" ] && [ "$(cd "$(dirname "$src")" && pwd)/$(basename "$src")" != "$SELF_COPY" ]; then
+    mkdir -p "$(dirname "$SELF_COPY")" && cp "$src" "$SELF_COPY"
+  fi
+}
+refresh_project() { # rerun setup after the code changed
+  local rc
+  for rc in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc"; do # our block sets LDRAW_DIR
+    [ -n "${LDRAW_DIR:-}" ] && break
+    [ -f "$rc" ] && eval "$(sed -n '/^# >>> ldraw-nova >>>$/,/^# <<< ldraw-nova <<<$/p' "$rc")"
+  done
+  [ -n "${LDRAW_DIR:-}" ] || die "LDRAW_DIR is not set. Run: export LDRAW_DIR=/path/to/ldraw, then try again."
+  local args=()
+  [ "$WITH_LSYNTH" = yes ] && args+=(--with-lsynth)
+  if ./setup.sh "${args[@]}" >/tmp/ldraw-nova-setup.log 2>&1; then ok "Python environment and parts index refreshed"
+  else tail -n 20 /tmp/ldraw-nova-setup.log; die "setup.sh failed (full log: /tmp/ldraw-nova-setup.log)"; fi
+}
+if [ "$ACTION" != install ]; then
+  DIR=$(expand "${DIR:-~/ldraw-nova}")
+  [ -d "$DIR/.git" ] || die "No ldraw-nova install found in $DIR. Pass --dir."
+  cd "$DIR"
+  HISTORY=.git/ldraw-nova-versions
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    die "You have changed files in $DIR. Commit or discard them first, so nothing is lost."
+  fi
+  current=$(git rev-parse HEAD)
+  if [ "$ACTION" = update ]; then
+    step "Updating $DIR"
+    git fetch -q origin || die "Could not reach $(git remote get-url origin)."
+    upstream=$(git rev-parse '@{u}' 2>/dev/null) || die "The current branch does not track a remote branch."
+    if [ "$upstream" = "$current" ]; then ok "Already up to date ($(git rev-parse --short HEAD))"; exit 0; fi
+    git merge -q --ff-only "$upstream" || die "Your copy has its own commits; update it with git instead."
+    echo "$current" >>"$HISTORY"
+    ok "Updated $(git rev-parse --short "$current") -> $(git rev-parse --short HEAD)"
+    git log --oneline "$current..HEAD" | head -n 10 | sed 's/^/    /'
+    [ -f install.sh ] && cp install.sh "$SELF_COPY" 2>/dev/null || true
+    refresh_project
+    ok "Done. To undo, run the Revert shortcut or: install.sh --revert --dir $DIR"
+  else
+    step "Reverting $DIR"
+    [ -s "$HISTORY" ] || die "There is no earlier version to go back to. One is recorded each time you update."
+    previous=$(tail -n 1 "$HISTORY")
+    git cat-file -e "$previous^{commit}" 2>/dev/null || die "The recorded version $previous is no longer available."
+    git reset -q --keep "$previous" || die "Could not switch back to $(git rev-parse --short "$previous")."
+    sed -i.bak '$d' "$HISTORY" && rm -f "$HISTORY.bak"
+    ok "Switched back $(git rev-parse --short "$current") -> $(git rev-parse --short HEAD)"
+    refresh_project
+    ok "Done. The next update brings you forward again."
+  fi
+  exit 0
+fi
+remember_self
 
 printf '%sldraw-nova installer%s\n' "$B" "$N"
 printf '  System: %s %s%s, package manager: %s\n' "$OS" "$ARCH" "$([ "$IS_WSL" = yes ] && echo ' (WSL)')" "${PKG:-none found}"
@@ -324,6 +387,12 @@ else
 fi
 if [ -n "$BRANCH" ] && [ "$(git -C "$DIR" rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
   git -C "$DIR" fetch -q origin "$BRANCH" && git -C "$DIR" checkout -q "$BRANCH" && ok "On branch $BRANCH"
+fi
+if [ ! -f "$SELF_COPY" ]; then # e.g. when run through curl | bash
+  mkdir -p "$(dirname "$SELF_COPY")"
+  if [ -f "$DIR/install.sh" ]; then cp "$DIR/install.sh" "$SELF_COPY"
+  else curl -fsSL https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.sh -o "$SELF_COPY" \
+    || warn "Could not save a copy of the installer; updates will need: curl ... | bash -s -- --update"; fi
 fi
 
 XRAY_DIR="$(dirname "$DIR")/ldraw-xray"
