@@ -22,6 +22,7 @@ param(
     [string]$Dir = "~/ldraw-nova",           # terminal mode: folder inside WSL
     [string]$WebDir = "",        # web mode: Windows folder (default %USERPROFILE%\LDRAW-NOVA)
     [string]$DockerRepo = "https://github.com/anteloc/ldraw-nova-docker",
+    [string]$Release = "",       # web mode: release tag such as v0.6.0 (default: the newest one)
     [string]$LDraw = "",         # terminal mode: folder containing parts\ and p\, or complete.zip
     [string]$Distro = "Ubuntu",
     [string]$InstallerRef = "master",
@@ -168,15 +169,51 @@ function Wait-Docker($seconds) {
     return $false
 }
 
-# Looks up a GitHub repository's default branch and its latest commit.
-function Get-RepoInfo($url) {
+function Split-RepoUrl($url) {
     if ($url -notmatch 'github\.com[/:]([^/]+)/([^/]+?)(\.git)?/?$') { Fail "The web app needs a GitHub repository URL, got '$url'." }
-    $owner = $Matches[1]; $name = $Matches[2]
-    $headers = @{ "User-Agent" = "ldraw-nova-installer" }
-    $repoInfo = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name" -Headers $headers
-    $branch = $repoInfo.default_branch
-    $commit = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name/commits/$branch" -Headers $headers
-    return @{ Url = $url; Owner = $owner; Name = $name; Branch = $branch; Sha = [string]$commit.sha }
+    return @($Matches[1], $Matches[2])
+}
+$GitHubHeaders = @{ "User-Agent" = "ldraw-nova-installer" }
+
+# Looks up the commit of $ref (a tag or branch) in a GitHub repository.
+function Get-RepoInfo($url, $ref) {
+    $owner, $name = Split-RepoUrl $url
+    $commit = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name/commits/$ref" -Headers $GitHubHeaders
+    return @{ Url = $url; Owner = $owner; Name = $name; Branch = $ref; Sha = [string]$commit.sha }
+}
+
+# Release tags (v1.2.3) of a GitHub repository, newest first.
+function Get-ReleaseTags($url) {
+    $owner, $name = Split-RepoUrl $url
+    $tags = @(Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name/tags?per_page=100" -Headers $GitHubHeaders)
+    $names = @($tags | ForEach-Object { [string]$_.name } | Where-Object { $_ -match '^v\d+(\.\d+){1,3}$' })
+    return @($names | Sort-Object { [version]($_.Substring(1)) } -Descending)
+}
+
+# The web app and the tools must come from the same release: newer tools code is often
+# ahead of the newest web app and breaks it. Picks that release ($Release, or the newest
+# one both projects have) and returns the two commits. The tools come from $novaUrl when
+# it has the tag, otherwise from the original repository.
+function Resolve-WebRelease($novaUrl, $dockerUrl) {
+    $dockerTags = Get-ReleaseTags $dockerUrl
+    $originalTags = Get-ReleaseTags $OriginalRepo
+    $chosenTags = if ($novaUrl -eq $OriginalRepo) { $originalTags } else { Get-ReleaseTags $novaUrl }
+    if ($Release) {
+        if ($dockerTags -notcontains $Release) { Fail "The web app has no release $Release. Available: $($dockerTags -join ', ')" }
+        $tag = $Release
+    } else {
+        $tag = @($dockerTags | Where-Object { ($chosenTags -contains $_) -or ($originalTags -contains $_) })[0]
+        if (-not $tag) { Fail "Could not find a release that the web app and the tools both have." }
+    }
+    $source = $novaUrl
+    if ($chosenTags -notcontains $tag) {
+        if ($originalTags -notcontains $tag) { Fail "The tools have no release $tag." }
+        if ($novaUrl -ne $OriginalRepo) { Warn "$novaUrl has no $tag release, so the web app uses the original repository's $tag tools. Terminal mode still uses your repository." }
+        $source = $OriginalRepo
+    }
+    $nova = Get-RepoInfo $source $tag
+    $nova.Chosen = $novaUrl
+    return @{ Tag = $tag; Nova = $nova; Docker = (Get-RepoInfo $dockerUrl $tag) }
 }
 
 # Downloads one exact commit as a zip and unpacks it into $dest (created fresh).
@@ -209,7 +246,7 @@ function Read-WebConfig($root) {
 }
 function Save-WebConfig($root, $nova, $docker) {
     $data = [ordered]@{
-        repo = $nova.Url; dockerRepo = $docker.Url
+        repo = $nova.Chosen; dockerRepo = $docker.Url; release = $docker.Branch
         novaSha = $nova.Sha; dockerSha = $docker.Sha
         installed = (Get-Date).ToString("yyyy-MM-dd HH:mm")
     }
@@ -295,10 +332,10 @@ function Update-WebApp($root) {
     if ($config) { $repoUrl = $config.repo; $dockerUrl = $config.dockerRepo }
     if ($Repo) { $repoUrl = $Repo }
     Start-DockerOrFail
-    $nova = Get-RepoInfo $repoUrl
-    $docker = Get-RepoInfo $dockerUrl
+    $pair = Resolve-WebRelease $repoUrl $dockerUrl
+    $nova = $pair.Nova; $docker = $pair.Docker
     if ($config -and $config.novaSha -eq $nova.Sha -and $config.dockerSha -eq $docker.Sha) {
-        Ok "Already up to date ($($nova.Sha.Substring(0,7)) / $($docker.Sha.Substring(0,7)))"
+        Ok "Already up to date (release $($pair.Tag))"
         return
     }
     $stamp = New-Stamp $root
@@ -326,7 +363,7 @@ function Update-WebApp($root) {
     if (-not (Invoke-Compose $root @("up", "-d"))) { Fail "The new version did not start. Use the 'Revert LDRAW-NOVA update' shortcut to go back." }
     $newManager = Join-Path $root "ldraw-nova\install.ps1"
     if (Test-Path -LiteralPath $newManager) { Copy-Item -LiteralPath $newManager -Destination (Join-Path $root $ManagerName) -Force }
-    Ok "Updated to $($nova.Sha.Substring(0,7)) / $($docker.Sha.Substring(0,7)). The previous version is saved as $stamp."
+    Ok "Updated to release $($pair.Tag). The previous version is saved as $stamp."
 
     $old = @(Get-Backups $root | Select-Object -Skip $KeepVersions)
     foreach ($b in $old) { Remove-Backup $b; Ok "Removed old saved version $($b.Name)" }
@@ -343,7 +380,8 @@ function Undo-WebUpdate($root) {
         $cfgPath = Join-Path $b.FullName $ConfigName
         if (Test-Path -LiteralPath $cfgPath) {
             $c = Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json
-            $label = "$($b.Name)  (tools $($c.novaSha.Substring(0,7)), app $($c.dockerSha.Substring(0,7)), installed $($c.installed))"
+            $rel = if ($c.release) { "release $($c.release)" } else { "tools $($c.novaSha.Substring(0,7)), app $($c.dockerSha.Substring(0,7))" }
+            $label = "$($b.Name)  ($rel, installed $($c.installed))"
         }
         Write-Host "  $i) $label"; $i++
     }
@@ -548,8 +586,9 @@ if ($wantWeb) {
 
     Step "Downloading the web app and the tools"
     # docker-compose.yml expects the two folders side by side.
-    $novaInfo = Get-RepoInfo $Repo
-    $dockerInfo = Get-RepoInfo $DockerRepo
+    $pair = Resolve-WebRelease $Repo $DockerRepo
+    $novaInfo = $pair.Nova; $dockerInfo = $pair.Docker
+    Ok "Release $($pair.Tag) of the web app and the tools"
     $existingData = Join-Path $webRoot "ldraw-nova-docker\data"
     $keepData = Join-Path $webRoot ".data-hold"
     if (Test-Path -LiteralPath $existingData) { Move-Item -LiteralPath $existingData -Destination $keepData }
