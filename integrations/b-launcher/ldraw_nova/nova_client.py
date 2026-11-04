@@ -90,7 +90,15 @@ class Nova:
                             timeout=timeout)
         event, data = "message", []
         with answer:
-            for raw in answer:
+            lines = iter(answer)
+            while True:
+                try:
+                    raw = next(lines)
+                except StopIteration:
+                    return
+                except (socket.timeout, OSError, ValueError) as e:
+                    # A stalled or dropped stream: the caller reconnects.
+                    raise NovaError(f"The progress stream dropped ({e}).") from None
                 line = raw.decode("utf-8", "replace").rstrip("\r\n")
                 if not line:
                     if data:
