@@ -5,6 +5,9 @@
 # or, from a downloaded copy:
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
+# Later: the "Update LDRAW-NOVA" and "Revert LDRAW-NOVA update" shortcuts run this
+# script with -Update or -Revert (web app). Terminal mode uses install.sh --update/--revert.
+#
 # Two ways to use LDRAW-NOVA, and you can install both:
 #  - Web app (recommended): a chat page in your browser with a 3D viewer and VR.
 #    Runs in Docker Desktop; sign in to Claude or ChatGPT inside the app.
@@ -25,6 +28,9 @@ param(
     [switch]$WithLsynth,
     [switch]$NoShortcut,
     [switch]$NoBuild,            # web mode: set everything up but skip the Docker build
+    [switch]$Update,             # update an existing install to the latest version (keeps a backup)
+    [switch]$Revert,             # switch back to a version saved by -Update
+    [int]$KeepVersions = 3,      # how many previous versions -Update keeps
     [switch]$Yes,
     [switch]$FromBat,            # set by Install-LDRAW-NOVA.bat: report status through the exit code
     [string[]]$InstallArgs = @() # extra options passed to install.sh, e.g. --skip-test
@@ -35,6 +41,10 @@ $DirGiven = $PSBoundParameters.ContainsKey("Dir")
 $ForkRepo = "https://github.com/Kerklord/ldraw-nova.git"
 $OriginalRepo = "https://github.com/anteloc/ldraw-nova.git"
 $InstallerUrl = "https://raw.githubusercontent.com/Kerklord/ldraw-nova/$InstallerRef/install.sh"
+$ManagerUrl = "https://raw.githubusercontent.com/Kerklord/ldraw-nova/$InstallerRef/install.ps1"
+$ManagerName = "ldraw-nova-manager.ps1"   # copy of this script kept in the web app folder
+$ConfigName = "ldraw-nova-install.json"
+$ImageName = "ldraw-nova-app"
 $WebUrl = "http://localhost:8765"
 $DockerBin = Join-Path $env:ProgramFiles "Docker\Docker\resources\bin"
 $DockerExe = Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
@@ -158,30 +168,222 @@ function Wait-Docker($seconds) {
     return $false
 }
 
-# Downloads a GitHub repository's default branch as a zip and merges it into $dest
-# (files you added, such as the web app's data folder, are kept).
-function Get-GitHubCode($url, $dest) {
+# Looks up a GitHub repository's default branch and its latest commit.
+function Get-RepoInfo($url) {
     if ($url -notmatch 'github\.com[/:]([^/]+)/([^/]+?)(\.git)?/?$') { Fail "The web app needs a GitHub repository URL, got '$url'." }
     $owner = $Matches[1]; $name = $Matches[2]
-    $info = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name" -Headers @{ "User-Agent" = "ldraw-nova-installer" }
-    $branch = $info.default_branch
-    $zip = Join-Path ([IO.Path]::GetTempPath()) "$name-$branch.zip"
-    $tmp = Join-Path ([IO.Path]::GetTempPath()) "$name-$branch-unpacked"
-    Write-Host "  Downloading $owner/$name ($branch)"
+    $headers = @{ "User-Agent" = "ldraw-nova-installer" }
+    $repoInfo = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name" -Headers $headers
+    $branch = $repoInfo.default_branch
+    $commit = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name/commits/$branch" -Headers $headers
+    return @{ Url = $url; Owner = $owner; Name = $name; Branch = $branch; Sha = [string]$commit.sha }
+}
+
+# Downloads one exact commit as a zip and unpacks it into $dest (created fresh).
+function Save-RepoCode($info, $dest) {
+    $short = $info.Sha.Substring(0, 7)
+    $zip = Join-Path ([IO.Path]::GetTempPath()) "$($info.Name)-$short.zip"
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) "$($info.Name)-$short-unpacked"
+    Write-Host "  Downloading $($info.Owner)/$($info.Name) ($($info.Branch) @ $short)"
     $oldProgress = $ProgressPreference; $ProgressPreference = "SilentlyContinue"   # much faster in 5.1
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/$owner/$name/zip/refs/heads/$branch" -OutFile $zip
+        Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/$($info.Owner)/$($info.Name)/zip/$($info.Sha)" -OutFile $zip
         if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }
         Write-Host "  Unpacking (this can take a few minutes)"
         Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
     } finally { $ProgressPreference = $oldProgress }
     $top = @(Get-ChildItem -LiteralPath $tmp -Directory)
-    if ($top.Count -ne 1) { Fail "Unexpected layout in the $name download." }
-    New-Item -ItemType Directory -Force -Path $dest | Out-Null
-    Copy-Item -Path (Join-Path $top[0].FullName "*") -Destination $dest -Recurse -Force
+    if ($top.Count -ne 1) { Fail "Unexpected layout in the $($info.Name) download." }
+    if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+    Move-Item -LiteralPath $top[0].FullName -Destination $dest
     Remove-Item -LiteralPath $tmp -Recurse -Force
     Remove-Item -LiteralPath $zip -Force
-    Ok "$owner/$name is in $dest"
+    Ok "$($info.Owner)/$($info.Name) $short ready"
+}
+
+function Read-WebConfig($root) {
+    $path = Join-Path $root $ConfigName
+    if (Test-Path -LiteralPath $path) { return (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json) }
+    return $null
+}
+function Save-WebConfig($root, $nova, $docker) {
+    $data = [ordered]@{
+        repo = $nova.Url; dockerRepo = $docker.Url
+        novaSha = $nova.Sha; dockerSha = $docker.Sha
+        installed = (Get-Date).ToString("yyyy-MM-dd HH:mm")
+    }
+    $data | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root $ConfigName) -Encoding UTF8
+}
+
+function Test-ImageExists($tag) {
+    $ErrorActionPreference = "Continue"
+    & docker image inspect $tag *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Start-DockerOrFail {
+    Add-DockerPath
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { Fail "Docker Desktop is not installed. Run the installer first." }
+    if (-not (Test-DockerRunning)) {
+        Write-Host "  Starting Docker Desktop"
+        if (Test-Path -LiteralPath $DockerExe) { Start-Process $DockerExe }
+        Write-Host -NoNewline "  Waiting for Docker"
+        if (-not (Wait-Docker 300)) { Fail "Docker Desktop did not start. Open it from the Start menu, wait until it is running, and try again." }
+    }
+}
+
+# Builds the app from code in $codeRoot (folders ldraw-nova and ldraw-nova-docker).
+function Build-WebApp($codeRoot) {
+    Push-Location (Join-Path $codeRoot "ldraw-nova-docker")
+    try {
+        & docker compose build | Out-Host
+        return ($LASTEXITCODE -eq 0)
+    } finally { Pop-Location }
+}
+
+function Invoke-Compose($root, [string[]]$composeArgs) {
+    Push-Location (Join-Path $root "ldraw-nova-docker")
+    try { & docker compose @composeArgs | Out-Host; return ($LASTEXITCODE -eq 0) } finally { Pop-Location }
+}
+function Remove-Image($tag) {
+    $ErrorActionPreference = "Continue"
+    & docker image rm $tag *> $null
+}
+
+# Swaps the code folders in $root with those in $from; the app's data folder stays in place.
+# The replaced code moves to $to. Call with the app stopped.
+function Switch-WebCode($root, $from, $to) {
+    $liveDocker = Join-Path $root "ldraw-nova-docker"
+    $hold = Join-Path $root ".data-hold"
+    if (Test-Path -LiteralPath $hold) { Fail "A previous update was interrupted: move '$hold' back to '$liveDocker\data' first." }
+    New-Item -ItemType Directory -Force -Path $to | Out-Null
+    Move-Item -LiteralPath (Join-Path $liveDocker "data") -Destination $hold
+    foreach ($name in @("ldraw-nova", "ldraw-nova-docker")) {
+        Move-Item -LiteralPath (Join-Path $root $name) -Destination (Join-Path $to $name)
+        Move-Item -LiteralPath (Join-Path $from $name) -Destination (Join-Path $root $name)
+    }
+    $incomingData = Join-Path $liveDocker "data"
+    if (Test-Path -LiteralPath $incomingData) { Remove-Item -LiteralPath $incomingData -Recurse -Force }
+    Move-Item -LiteralPath $hold -Destination $incomingData
+}
+
+# A version name that is not used yet in $root\versions (two quick operations can share a second).
+function New-Stamp($root) {
+    $base = Get-Date -Format "yyyyMMdd-HHmmss"
+    $stamp = $base; $n = 2
+    while ((Test-Path -LiteralPath (Join-Path (Join-Path $root "versions") $stamp)) -or (Test-ImageExists "${ImageName}:v-$stamp")) { $stamp = "$base-$n"; $n++ }
+    return $stamp
+}
+
+function Get-Backups($root) {
+    $dir = Join-Path $root "versions"
+    if (-not (Test-Path -LiteralPath $dir)) { return @() }
+    return @(Get-ChildItem -LiteralPath $dir -Directory | Sort-Object Name -Descending)
+}
+
+function Remove-Backup($backup) {
+    Remove-Image "${ImageName}:v-$($backup.Name)"
+    Remove-Item -LiteralPath $backup.FullName -Recurse -Force
+}
+
+function Update-WebApp($root) {
+    Step "Updating the web app in $root"
+    $config = Read-WebConfig $root
+    if (-not (Test-Path -LiteralPath (Join-Path $root "ldraw-nova-docker"))) { Fail "No web app found in $root. Run the installer first." }
+    $repoUrl = $ForkRepo; $dockerUrl = $DockerRepo
+    if ($config) { $repoUrl = $config.repo; $dockerUrl = $config.dockerRepo }
+    if ($Repo) { $repoUrl = $Repo }
+    Start-DockerOrFail
+    $nova = Get-RepoInfo $repoUrl
+    $docker = Get-RepoInfo $dockerUrl
+    if ($config -and $config.novaSha -eq $nova.Sha -and $config.dockerSha -eq $docker.Sha) {
+        Ok "Already up to date ($($nova.Sha.Substring(0,7)) / $($docker.Sha.Substring(0,7)))"
+        return
+    }
+    $stamp = New-Stamp $root
+    $staging = Join-Path $root ".staging"
+    if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    Save-RepoCode $nova (Join-Path $staging "ldraw-nova")
+    Save-RepoCode $docker (Join-Path $staging "ldraw-nova-docker")
+
+    # Keep the running version's image under a version tag, so a revert needs no rebuild.
+    if (Test-ImageExists $ImageName) { & docker image tag $ImageName "${ImageName}:v-$stamp" | Out-Null }
+    Step "Building the new version (the current one keeps running meanwhile)"
+    if (-not (Build-WebApp $staging)) {
+        Remove-Item -LiteralPath $staging -Recurse -Force
+        if (Test-ImageExists "${ImageName}:v-$stamp") { & docker image tag "${ImageName}:v-$stamp" $ImageName | Out-Null; Remove-Image "${ImageName}:v-$stamp" }
+        Fail "The new version did not build, so nothing was changed. Your current version is still installed."
+    }
+
+    Step "Switching to the new version"
+    Invoke-Compose $root @("stop") | Out-Null
+    $backupDir = Join-Path (Join-Path $root "versions") $stamp
+    Switch-WebCode $root $staging $backupDir
+    if ($config) { $config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $backupDir $ConfigName) -Encoding UTF8 }
+    Remove-Item -LiteralPath $staging -Recurse -Force
+    Save-WebConfig $root $nova $docker
+    if (-not (Invoke-Compose $root @("up", "-d"))) { Fail "The new version did not start. Use the 'Revert LDRAW-NOVA update' shortcut to go back." }
+    $newManager = Join-Path $root "ldraw-nova\install.ps1"
+    if (Test-Path -LiteralPath $newManager) { Copy-Item -LiteralPath $newManager -Destination (Join-Path $root $ManagerName) -Force }
+    Ok "Updated to $($nova.Sha.Substring(0,7)) / $($docker.Sha.Substring(0,7)). The previous version is saved as $stamp."
+
+    $old = @(Get-Backups $root | Select-Object -Skip $KeepVersions)
+    foreach ($b in $old) { Remove-Backup $b; Ok "Removed old saved version $($b.Name)" }
+}
+
+function Undo-WebUpdate($root) {
+    Step "Reverting the web app in $root"
+    $backups = @(Get-Backups $root)
+    if ($backups.Count -eq 0) { Fail "There is no saved version to go back to yet. A version is saved each time you update." }
+    Write-Host "  Saved versions, newest first:"
+    $i = 1
+    foreach ($b in $backups) {
+        $label = $b.Name
+        $cfgPath = Join-Path $b.FullName $ConfigName
+        if (Test-Path -LiteralPath $cfgPath) {
+            $c = Get-Content -LiteralPath $cfgPath -Raw | ConvertFrom-Json
+            $label = "$($b.Name)  (tools $($c.novaSha.Substring(0,7)), app $($c.dockerSha.Substring(0,7)), installed $($c.installed))"
+        }
+        Write-Host "  $i) $label"; $i++
+    }
+    $pick = [int](Ask "Which version?" "1")
+    if ($pick -lt 1 -or $pick -gt $backups.Count) { Fail "No such version." }
+    $chosen = $backups[$pick - 1]
+    Start-DockerOrFail
+    $tag = "${ImageName}:v-$($chosen.Name)"
+    $haveImage = Test-ImageExists $tag
+    if (-not $haveImage) { Warn "The saved image is gone, so this version will be rebuilt." }
+
+    $stamp = New-Stamp $root
+    if (Test-ImageExists $ImageName) { & docker image tag $ImageName "${ImageName}:v-$stamp" | Out-Null }
+    $config = Read-WebConfig $root
+    Invoke-Compose $root @("stop") | Out-Null
+    $current = Join-Path (Join-Path $root "versions") $stamp
+    Switch-WebCode $root $chosen.FullName $current
+    if ($config) { $config | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $current $ConfigName) -Encoding UTF8 }
+    $chosenCfg = Join-Path $chosen.FullName $ConfigName
+    if (Test-Path -LiteralPath $chosenCfg) { Move-Item -LiteralPath $chosenCfg -Destination (Join-Path $root $ConfigName) -Force }
+    Remove-Item -LiteralPath $chosen.FullName -Recurse -Force
+    if ($haveImage) {
+        & docker image tag $tag $ImageName | Out-Null
+        Remove-Image $tag
+        $ok = Invoke-Compose $root @("up", "-d", "--no-build")
+    } else {
+        $ok = (Build-WebApp $root) -and (Invoke-Compose $root @("up", "-d"))
+    }
+    if (-not $ok) { Fail "The selected version did not start. The version you just left is saved as $stamp; run Revert again to return to it." }
+    Ok "Switched back to $($chosen.Name). The version you just left is saved as $stamp, so you can switch again."
+}
+
+# Keeps a copy of this script beside the app so the Update and Revert shortcuts work offline.
+function Save-Manager($root) {
+    $target = Join-Path $root $ManagerName
+    if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
+        if ((Resolve-Path -LiteralPath $PSCommandPath).Path -ne $target) { Copy-Item -LiteralPath $PSCommandPath -Destination $target -Force }
+    } else {
+        Invoke-WebRequest -UseBasicParsing -Uri $ManagerUrl -OutFile $target
+    }
 }
 
 $StartScript = @'
@@ -219,7 +421,20 @@ Write-Host "LDRAW-NOVA stopped."
 Start-Sleep -Seconds 2
 '@
 
+function Invoke-Maintenance {
+    $root = $WebDir
+    if (-not $root) { $root = Join-Path $env:USERPROFILE "LDRAW-NOVA" }
+    if (-not (Test-Path -LiteralPath $root)) { Fail "No LDRAW-NOVA web app found in $root." }
+    $root = (Resolve-Path -LiteralPath $root).Path
+    try {
+        if ($Update) { Update-WebApp $root } else { Undo-WebUpdate $root }
+    } finally {
+        if (-not $Yes -and -not $FromBat) { Read-Host "Press Enter to close" | Out-Null }
+    }
+}
+
 function Main {
+if ($Update -or $Revert) { Invoke-Maintenance; return }
 Write-Host "LDRAW-NOVA installer for Windows" -ForegroundColor White
 
 # ---------- 1. How will you use it? ----------
@@ -333,8 +548,20 @@ if ($wantWeb) {
 
     Step "Downloading the web app and the tools"
     # docker-compose.yml expects the two folders side by side.
-    Get-GitHubCode $Repo (Join-Path $webRoot "ldraw-nova")
-    Get-GitHubCode $DockerRepo (Join-Path $webRoot "ldraw-nova-docker")
+    $novaInfo = Get-RepoInfo $Repo
+    $dockerInfo = Get-RepoInfo $DockerRepo
+    $existingData = Join-Path $webRoot "ldraw-nova-docker\data"
+    $keepData = Join-Path $webRoot ".data-hold"
+    if (Test-Path -LiteralPath $existingData) { Move-Item -LiteralPath $existingData -Destination $keepData }
+    Save-RepoCode $novaInfo (Join-Path $webRoot "ldraw-nova")
+    Save-RepoCode $dockerInfo (Join-Path $webRoot "ldraw-nova-docker")
+    if (Test-Path -LiteralPath $keepData) {
+        Remove-Item -LiteralPath $existingData -Recurse -Force
+        Move-Item -LiteralPath $keepData -Destination $existingData
+        Ok "Kept your existing chats and models"
+    }
+    Save-WebConfig $webRoot $novaInfo $dockerInfo
+    Save-Manager $webRoot
     Set-Content -LiteralPath (Join-Path $webRoot "Start LDRAW-NOVA.ps1") -Value $StartScript -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $webRoot "Stop LDRAW-NOVA.ps1") -Value $StopScript -Encoding UTF8
 
@@ -449,6 +676,8 @@ if (-not $NoShortcut) {
         New-Shortcut "LDRAW-NOVA" $ps "-NoProfile -ExecutionPolicy Bypass -File `"$webRoot\Start LDRAW-NOVA.ps1`"" "Start the web app and open it in your browser"
         New-Shortcut "Stop LDRAW-NOVA" $ps "-NoProfile -ExecutionPolicy Bypass -File `"$webRoot\Stop LDRAW-NOVA.ps1`"" "Stop the web app (chats and models are kept)"
         New-Shortcut "LDRAW-NOVA models" "$env:SystemRoot\explorer.exe" "`"$webRoot\ldraw-nova-docker\data`"" "Open the folder with your models and chats"
+        New-Shortcut "Update LDRAW-NOVA" $ps "-NoProfile -ExecutionPolicy Bypass -File `"$webRoot\$ManagerName`" -Update -WebDir `"$webRoot`"" "Update the web app to the latest version (the current one is saved)"
+        New-Shortcut "Revert LDRAW-NOVA update" $ps "-NoProfile -ExecutionPolicy Bypass -File `"$webRoot\$ManagerName`" -Revert -WebDir `"$webRoot`"" "Switch the web app back to a saved version"
     }
     if ($wantTerminal) {
         if ($AI -eq "claude" -or $AI -eq "both") {
@@ -460,6 +689,8 @@ if (-not $NoShortcut) {
         if ($terminalDir) {
             New-Shortcut "LDRAW-NOVA files" "$env:SystemRoot\explorer.exe" "`"$terminalDir`"" "Open the terminal tools folder (models land in output)"
         }
+        New-Shortcut "Update LDRAW-NOVA (terminal)" $wsl "-d $Distro --cd `"$dirLinux`" -e bash -lc `"bash ~/.local/share/ldraw-nova/install.sh --update --dir '$dirLinux'; read -rp 'Press Enter to close' _`"" "Update the terminal tools (the current version is remembered)"
+        New-Shortcut "Revert LDRAW-NOVA (terminal)" $wsl "-d $Distro --cd `"$dirLinux`" -e bash -lc `"bash ~/.local/share/ldraw-nova/install.sh --revert --dir '$dirLinux'; read -rp 'Press Enter to close' _`"" "Go back to the terminal tools version before the last update"
     }
 }
 

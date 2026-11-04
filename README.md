@@ -26,7 +26,9 @@ irm https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.ps1 | i
 curl -fsSL https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.sh | bash
 ```
 
-Options such as `--ai claude|gpt|both`, `--repo original`, `--dir`, `--ldraw PATH` (a folder or `complete.zip`) and `--with-lsynth` skip the questions; see `install.sh --help`. `install.ps1` takes `-Mode web|terminal|both`, `-AI`, `-WebDir`, `-LDraw` and `-Repo`. From a cloned copy, run `./install.sh` or `powershell -ExecutionPolicy Bypass -File install.ps1`.
+**Updating.** Double-click **Update LDRAW-NOVA** (terminal mode: **Update LDRAW-NOVA (terminal)**). For the web app it downloads the latest code and builds the new version while the current one keeps running; if the build fails, nothing changes. Your chats, models and logins are kept, and only changed Docker layers rebuild, so an update usually takes minutes. The previous three versions are saved: **Revert LDRAW-NOVA update** lists them and switches back instantly, and running it again returns you to the version you left. In terminal mode, Revert steps back one update at a time and Update brings you forward again. On macOS or Linux, run `~/.local/share/ldraw-nova/install.sh --update` or `--revert` (add `--dir` if you installed elsewhere); terminal mode refuses to update over edited tracked files.
+
+Options such as `--ai claude|gpt|both`, `--repo original`, `--dir`, `--ldraw PATH` (a folder or `complete.zip`) and `--with-lsynth` skip the questions; see `install.sh --help`. `install.ps1` takes `-Mode web|terminal|both`, `-AI`, `-WebDir`, `-LDraw`, `-Repo`, and `-Update` or `-Revert` with `-KeepVersions N`. From a cloned copy, run `./install.sh` or `powershell -ExecutionPolicy Bypass -File install.ps1`.
 
 ## Start locally
 
