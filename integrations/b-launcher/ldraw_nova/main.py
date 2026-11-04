@@ -126,7 +126,8 @@ class Builder:
         if not choice or choice == AI_DEFAULT:
             return default_id or models[0]["id"], None
         for m in models:
-            if choice in (m.get("model_name"), m.get("id")):
+            name = str(m.get("model_name") or "").strip()
+            if choice in (name, name[:80], m.get("id")):
                 return m["id"], m.get("model_name")
         raise RuntimeError(f"The AI {choice!r} isn't set up in the web app any more. "
                            "Press Refresh in the add-on's panel and pick again.")
@@ -289,11 +290,13 @@ def manifest_kinds():
 def kinds_with_ai(names):
     """The node kinds with the AI dropdown listing these models."""
     kinds = manifest_kinds()
-    options = [AI_DEFAULT] + [n for n in dict.fromkeys(names) if n and n != AI_DEFAULT][:49]
+    # B-Launcher wants 1-50 distinct options of at most 80 characters.
+    options = list(dict.fromkeys(
+        [AI_DEFAULT] + [str(n).strip()[:80] for n in names if n and str(n).strip()]))[:50]
     for kind in kinds:
         for entry in kind.get("fields", []):
             if entry["key"] == "ai":
-                entry["options"] = [o[:80] for o in options]
+                entry["options"] = options
                 entry["default"] = AI_DEFAULT
     return kinds
 

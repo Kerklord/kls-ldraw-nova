@@ -218,3 +218,46 @@ def test_ai_dropdown_is_filled_from_the_web_app():
     kinds = main.kinds_with_ai(["Claude Sonnet 5", "GPT-5", "GPT-5"])
     ai = next(f for f in kinds[0]["fields"] if f["key"] == "ai")
     assert ai["options"] == ["Default", "Claude Sonnet 5", "GPT-5"]
+
+
+def test_long_or_duplicate_ai_names_stay_valid():
+    long = "X" * 90
+    kinds = main.kinds_with_ai([long, long[:85], "Default", " "])
+    ai = next(f for f in kinds[0]["fields"] if f["key"] == "ai")
+    assert ai["options"] == ["Default", "X" * 80]
+
+
+def test_a_dropped_stream_reconnects(setup, monkeypatch):
+    web, addon, builder = setup()
+    real = builder.nova.stream
+    calls = []
+
+    def flaky(chat_id, timeout=30):
+        calls.append(1)
+        if len(calls) == 1:
+            web.finish(chat_id)       # the build ends while we're cut off
+            raise main.NovaError("The progress stream dropped (timed out).")
+        yield from real(chat_id)
+    monkeypatch.setattr(builder.nova, "stream", flaky)
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    assert builder.run(job())["output"].endswith("castle-v1.mpd")
+    assert len(calls) == 1          # not running any more: no reconnect needed
+
+
+def test_stream_stall_becomes_nova_error():
+    import socket
+    from nova_client import Nova, NovaError
+
+    class Stalled:
+        def __iter__(self):
+            return self
+        def __next__(self):
+            raise socket.timeout("timed out")
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            pass
+    nova = Nova("http://x")
+    nova._open = lambda *a, **k: Stalled()
+    with pytest.raises(NovaError, match="dropped"):
+        list(nova.stream("c"))
