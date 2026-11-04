@@ -8,7 +8,7 @@ Build LEGO models with an AI agent, ordinary JSON plans and LDraw parts. The too
 
 One command checks every requirement, installs what is missing (git, uv, Python 3.12, Poppler, LeoCAD 23.03+, Claude Code), clones the repository, points it at your LDraw library, runs `./setup.sh` and a test build. It asks which repository and folder to use, and where your LDraw parts are. Running it again is safe.
 
-**Windows** (PowerShell). Sets up WSL with Ubuntu, then installs inside it and adds `LDRAW-NOVA` desktop shortcuts. Your LDraw folder can stay on `C:\`; it is copied into Linux for speed. If WSL is new, restart when asked, open Ubuntu once to create a user, and run the command again.
+**Windows.** Download [`Install-LDRAW-NOVA.bat`](https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/Install-LDRAW-NOVA.bat) (right-click, *Save link as*) and double-click it. If Windows warns about a downloaded file, choose *More info* then *Run anyway*. Folder pickers let you choose your LDraw folder and where to install; the default install location, inside Linux, is fastest. The installer sets up WSL with Ubuntu, installs inside it and adds `LDRAW-NOVA` desktop shortcuts: one opens Claude Code ready to build, the other opens the folder where models appear. Your LDraw folder can stay on `C:\`; it is copied into Linux for speed. If WSL is new, restart when asked, open Ubuntu once to create a user, and double-click the installer again. From PowerShell, the same installer runs with:
 
 ```powershell
 irm https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.ps1 | iex

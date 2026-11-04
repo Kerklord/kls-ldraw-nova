@@ -19,6 +19,7 @@ param(
     [switch]$WithLsynth,
     [switch]$NoShortcut,
     [switch]$Yes,
+    [switch]$FromBat,             # set by Install-LDRAW-NOVA.bat: report status through the exit code
     [string[]]$InstallArgs = @()  # extra options passed to install.sh, e.g. --skip-test
 )
 
@@ -38,6 +39,29 @@ function Ask($question, $default) {
     $answer = Read-Host "$question [$default]"
     if ([string]::IsNullOrWhiteSpace($answer)) { return $default }
     return $answer.Trim().Trim('"')
+}
+function Confirm-Choice($question) {
+    if ($Yes) { return $true }
+    $answer = Read-Host "$question (Y/n)"
+    return -not ($answer -match '^\s*[nN]')
+}
+# Opens a Windows folder picker. Returns the folder, $null if cancelled,
+# or "" when no window can be shown (then the caller asks in text).
+function Select-Folder($description) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dialog.Description = $description
+        $dialog.ShowNewFolderButton = $true
+        $owner = New-Object System.Windows.Forms.Form
+        $owner.TopMost = $true
+        $result = $dialog.ShowDialog($owner)
+        $owner.Dispose()
+        if ($result -eq [System.Windows.Forms.DialogResult]::OK) { return $dialog.SelectedPath }
+        return $null
+    } catch {
+        return ""
+    }
 }
 function Clean($text) { return (($text | Out-String) -replace "`0", "").Trim() }
 
@@ -77,6 +101,7 @@ if ($distros -notcontains $Distro) {
         Write-Host "  1. Restart your PC if Windows asks you to."
         Write-Host "  2. Open '$Distro' from the Start menu once, and create a Linux username and password."
         Write-Host "  3. Run this installer again. It will continue from here."
+        $script:Status = "restart"
         return
     }
 }
@@ -94,12 +119,14 @@ $linuxHome = Clean (& wsl.exe -d $Distro -e sh -c 'echo $HOME')
 Step "Locating your LDraw parts library"
 function Test-LDraw($path) {
     if ([string]::IsNullOrWhiteSpace($path)) { return $null }
-    if ((Test-Path -LiteralPath $path -PathType Leaf) -and $path.ToLower().EndsWith(".zip")) { return (Resolve-Path -LiteralPath $path).Path }
-    foreach ($candidate in @($path, (Join-Path $path "ldraw"))) {
-        if ((Test-Path -LiteralPath (Join-Path $candidate "parts")) -and (Test-Path -LiteralPath (Join-Path $candidate "p"))) {
-            return (Resolve-Path -LiteralPath $candidate).Path
+    try {
+        if ((Test-Path -LiteralPath $path -PathType Leaf) -and $path.ToLower().EndsWith(".zip")) { return (Resolve-Path -LiteralPath $path).Path }
+        foreach ($candidate in @($path, [IO.Path]::Combine($path, "ldraw"))) {
+            if ((Test-Path -LiteralPath ([IO.Path]::Combine($candidate, "parts"))) -and (Test-Path -LiteralPath ([IO.Path]::Combine($candidate, "p")))) {
+                return (Resolve-Path -LiteralPath $candidate).Path
+            }
         }
-    }
+    } catch { }
     return $null
 }
 $found = $null
@@ -111,13 +138,17 @@ if ($LDraw) {
                  "${env:ProgramFiles}\LDraw", "${env:ProgramFiles(x86)}\LDraw")
     $default = ""
     foreach ($g in $guesses) { if (Test-LDraw $g) { $default = $g; break } }
+    if ($default) {
+        if ($Yes -or (Confirm-Choice "Found your LDraw library at $default. Use it?")) { $found = Test-LDraw $default }
+    }
     while (-not $found) {
-        $answer = Ask "Folder with your LDraw parts (contains parts and p), or complete.zip" $default
+        if ($Yes) { break }
+        Write-Host "  A window will open. Select your LDraw folder (the one that contains 'parts' and 'p')."
+        $answer = Select-Folder "Select your LDraw folder (it contains the 'parts' and 'p' folders)"
+        if ($null -eq $answer) { Fail "No LDraw folder selected." }
+        if ($answer -eq "") { $answer = Ask "Folder with your LDraw parts (contains parts and p), or complete.zip" $default }
         $found = Test-LDraw $answer
-        if (-not $found) {
-            if ($Yes) { break }
-            Warn "No parts and p folders found in '$answer'. Try again."
-        }
+        if (-not $found) { Warn "No 'parts' and 'p' folders in '$answer'. Please pick the LDraw folder itself." }
     }
 }
 if (-not $found) { Fail "Could not find the LDraw library. Pass -LDraw 'C:\path\to\ldraw'." }
@@ -139,11 +170,29 @@ switch ($Repo) {
     "2" { $Repo = $OriginalRepo }
     "original" { $Repo = $OriginalRepo }
 }
+$dirLinux = $null
 if (-not $DirGiven -and -not $Yes) {
-    $Dir = Ask "Install folder inside WSL" $Dir
+    Step "Choosing where to install"
+    Write-Host "  1) Recommended: inside Linux (fastest). The 'LDRAW-NOVA files' shortcut opens it."
+    Write-Host "  2) Pick a folder on this PC (easier to find, but builds run noticeably slower)"
+    if ((Ask "Choose 1 or 2" "1") -eq "2") {
+        Write-Host "  A window will open. Pick where the 'ldraw-nova' folder should be created."
+        $parent = Select-Folder "Pick where to create the 'ldraw-nova' folder"
+        if ($null -eq $parent) { Fail "No install folder selected." }
+        if ($parent -eq "") { $parent = Ask "Folder to create ldraw-nova in" "$env:USERPROFILE" }
+        if (-not (Test-Path -LiteralPath $parent -PathType Container)) { Fail "Folder not found: $parent" }
+        $parentLinux = Clean (& wsl.exe -d $Distro -e wslpath -a "$parent")
+        if (-not $parentLinux.StartsWith("/")) { Fail "Could not translate '$parent' into a WSL path." }
+        $dirLinux = $parentLinux.TrimEnd("/") + "/ldraw-nova"
+    }
+}
+if (-not $dirLinux) {
+    $dirLinux = $Dir
+    if ($dirLinux -eq "~") { $dirLinux = $linuxHome }
+    elseif ($dirLinux.StartsWith("~/")) { $dirLinux = $linuxHome + $dirLinux.Substring(1) }
 }
 Ok "Repository: $Repo"
-Ok "Folder: $Dir (inside $Distro)"
+Ok "Folder: $dirLinux (path inside $Distro)"
 
 # ---------- 4. Run install.sh inside WSL ----------
 Step "Installing inside $Distro (it may ask for your Linux password)"
@@ -158,9 +207,6 @@ if ($local -and (Test-Path -LiteralPath $local)) {
     Ok "Downloaded install.sh"
 }
 $scriptLinux = Clean (& wsl.exe -d $Distro -e wslpath -a "$script")
-$dirLinux = $Dir
-if ($dirLinux -eq "~") { $dirLinux = $linuxHome }
-elseif ($dirLinux.StartsWith("~/")) { $dirLinux = $linuxHome + $dirLinux.Substring(1) }
 $shArgs = @("--repo", $Repo, "--dir", $dirLinux, "--ldraw", $ldrawLinux, "--copy-ldraw")
 if ($WithLsynth) { $shArgs += "--with-lsynth" }
 if ($Yes) { $shArgs += "--yes" }
@@ -199,4 +245,10 @@ Write-Host "  then type 'claude' and describe the model you want."
 if ($dirWindows) { Write-Host "  Your models and previews appear in: $dirWindows\output" }
 }
 
+$script:Status = "ok"
+if ($FromBat) {
+    try { Main } catch { Write-Host ""; Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red; exit 1 }
+    if ($script:Status -eq "restart") { exit 2 }
+    exit 0
+}
 Main
