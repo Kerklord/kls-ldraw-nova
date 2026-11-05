@@ -22,6 +22,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ADDON_DIR = os.environ.get("BLAUNCHER_ADDON_DIR") or HERE
 
 
+SHOW_NODE = "In the node"
+SHOW_GROUP = "On the board, in a group"
+SHOW_BOTH = "Both"
+SHOW_OFF = "Don't show it"
+RESULTS_GROUP = "LEGO builds"
+
+
 def data_dir():
     """Where settings live: outside the add-on's folder, because B-Launcher
     deletes that folder when the add-on is reinstalled."""
@@ -230,11 +237,14 @@ class Builder:
                            gathered.title)
         self.nova.download(model["model_url"], path)
         saved = [os.path.basename(path)]
-        if truthy(fields.get("extras", "yes")):
+        show = fields.get("show") or SHOW_NODE
+        if truthy(fields.get("extras", "yes")) or show != SHOW_OFF:
             model = self.wait_for_extras(chat_id, model, note)
+        if truthy(fields.get("extras", "yes")):
             saved += self.save_extras(model, model_file, path, note)
         parts = model.get("parts")
         summary = f"Saved {path}" + (f" ({parts} parts)" if parts else "")
+        self.show_result(job_id, show, model, path, parts, note)
         note(summary)
         try:
             self.addon.notify("LEGO build finished", os.path.basename(path))
@@ -325,6 +335,34 @@ class Builder:
             except NovaError as e:
                 note(f"Couldn't save {name}: {e}")
         return saved
+
+    def show_result(self, job_id, show, model, path, parts, note):
+        """Put the finished snapshot in the node and/or on the board.
+        Best effort: a build that saved its .mpd never fails over this."""
+        if show == SHOW_OFF or not hasattr(self.addon, "job_preview"):
+            return
+        url = model.get("image_url")
+        if not url or model.get("status") not in (None, "ready"):
+            note("No snapshot to show on the board.")
+            return
+        try:
+            image = self.nova.fetch(url)
+        except Exception as e:
+            note(f"Couldn't fetch the snapshot to show: {e}")
+            return
+        name = os.path.basename(path)
+        if show in (SHOW_NODE, SHOW_BOTH):
+            try:
+                self.addon.job_preview(job_id, image)
+            except Exception as e:
+                note(f"Couldn't show the picture in the node: {e}")
+        if show in (SHOW_GROUP, SHOW_BOTH):
+            caption = name + (f" ({parts} parts)" if parts else "")
+            try:
+                self.addon.job_reference(job_id, image, caption=caption,
+                                         title=name, group=RESULTS_GROUP)
+            except Exception as e:
+                note(f"Couldn't put the picture on the board: {e}")
 
     @staticmethod
     def last_reply(chat):

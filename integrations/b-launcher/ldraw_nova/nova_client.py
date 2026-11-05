@@ -116,6 +116,14 @@ class Nova:
 
     # --- files ------------------------------------------------------------
 
+    def fetch(self, url, limit=20 * 1024 * 1024):
+        """The bytes of a file the web app serves (a /files/... url)."""
+        with self._open("GET", url.split("?", 1)[0], timeout=120) as answer:
+            data = answer.read(limit + 1)
+        if len(data) > limit:
+            raise NovaError("That file is too big.")
+        return data
+
     def download(self, url, target):
         """Save a file the web app serves (a /files/... url) to `target`."""
         path = url.split("?", 1)[0]

@@ -114,6 +114,29 @@ class Addon:
     def job_note(self, job_id, message):
         self.post(f"/addon/jobs/{job_id}/note", {"message": str(message)})
 
+    @staticmethod
+    def _image_b64(image):
+        """A picture as base64: given as bytes, or as a file's path."""
+        import base64
+        if isinstance(image, (bytes, bytearray)):
+            data = bytes(image)
+        else:
+            with open(image, "rb") as handle:
+                data = handle.read()
+        return base64.b64encode(data).decode("ascii")
+
+    def job_preview(self, job_id, image):
+        """Show a picture of what the job made inside its node."""
+        return self.post(f"/addon/jobs/{job_id}/preview",
+                         {"image": self._image_b64(image)})
+
+    def job_reference(self, job_id, image, caption="", title="", group=""):
+        """Put a picture on the job's board as a Reference, in the group
+        called `group` (made beside the node if there isn't one)."""
+        return self.post(f"/addon/jobs/{job_id}/reference",
+                         {"image": self._image_b64(image), "caption": caption,
+                          "title": title, "group": group})
+
     def job_done(self, job_id, ok=True, message="", error="", output=None,
                  retry=None):
         """Answer a job. `output` is the file it made, for the next node;

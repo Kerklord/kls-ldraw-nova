@@ -264,3 +264,51 @@ def test_stream_stall_becomes_nova_error():
     nova._open = lambda *a, **k: Stalled()
     with pytest.raises(NovaError, match="dropped"):
         list(nova.stream("c"))
+
+
+class ShowingAddon(FakeAddon):
+    def __init__(self, fail=False):
+        super().__init__()
+        self.previews, self.references, self.fail = [], [], fail
+
+    def job_preview(self, job_id, image):
+        if self.fail:
+            raise RuntimeError("B-Launcher is too old")
+        self.previews.append((job_id, image))
+
+    def job_reference(self, job_id, image, caption="", title="", group=""):
+        self.references.append((job_id, image, caption, title, group))
+
+
+def showing(tmp_path, monkeypatch, fail=False):
+    monkeypatch.setattr(main, "STATE_FILE", str(tmp_path / "state.json"))
+    web, addon = FakeWeb(), ShowingAddon(fail)
+    return web, addon, main.Builder(addon, {"web_url": web.url,
+                                            "folder": str(tmp_path / "out")})
+
+
+def test_the_finished_picture_goes_in_the_node_by_default(tmp_path, monkeypatch):
+    web, addon, builder = showing(tmp_path, monkeypatch)
+    builder.run(job(extras="no"))
+    assert addon.previews == [("j1", b"\x89PNG fake")]
+    assert addon.references == []
+    assert not (tmp_path / "out" / "castle-v1.png").exists()
+
+
+def test_the_finished_picture_on_the_board_or_both(tmp_path, monkeypatch):
+    web, addon, builder = showing(tmp_path, monkeypatch)
+    builder.run(job(show=main.SHOW_GROUP))
+    assert addon.previews == []
+    (_, image, caption, title, group), = addon.references
+    assert image == b"\x89PNG fake" and title == "castle-v1.mpd"
+    assert caption == "castle-v1.mpd (42 parts)" and group == main.RESULTS_GROUP
+    builder.run(job(show=main.SHOW_BOTH))
+    assert len(addon.previews) == 1 and len(addon.references) == 2
+    builder.run(job(show=main.SHOW_OFF))
+    assert len(addon.previews) == 1 and len(addon.references) == 2
+
+
+def test_showing_the_picture_never_fails_the_build(tmp_path, monkeypatch):
+    web, addon, builder = showing(tmp_path, monkeypatch, fail=True)
+    assert builder.run(job())["output"].endswith("castle-v1.mpd")
+    assert any("Couldn't show the picture" in n for n in addon.notes)
