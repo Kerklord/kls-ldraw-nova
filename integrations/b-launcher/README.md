@@ -6,8 +6,8 @@ LDRAW-NOVA web app, follows the build in the queue log, and saves the
 finished `.mpd` where you chose. Then it hands that file to the next node, so
 **LEGO build → Open in program (Stud.io)** opens the model when it's done.
 
-Needs B-Launcher 1.6 with add-on guide 1.4 or newer (dropdown fields, job
-outputs, cancel events, the Group `photos` output, and job pictures on the board), and the LDRAW-NOVA web app running. The web app is
+Needs B-Launcher 1.6 with add-on guide 1.5 or newer (dropdown fields, job
+outputs, cancel events, the Group `photos` output, job pictures on the board, and the node Console), and the LDRAW-NOVA web app running. The web app is
 at http://localhost:8765 by default. The add-on uses only Python's standard
 library.
 
@@ -32,6 +32,10 @@ library.
 | Save .mpd as | A file (`D:\LEGO\castle.mpd`) or a folder. Blank uses the panel's default folder. An existing file is never overwritten: it saves `castle-v2.mpd` instead. |
 | Also save snapshot and parts list | Saves the PNG preview and the parts list next to the `.mpd`. |
 | Show the finished picture | `In the node` (default) shows the model's snapshot inside the node; double-click the node to see it full size, Escape closes it. `On the board, in a group` adds the snapshot as a Reference, captioned with the file name and part count, in a group called **LEGO builds** beside the node (made the first time, reused after). `Both`, or `Don't show it`. Works even when the snapshot isn't saved to disk. |
+
+## Watching it work
+
+Click the LEGO build node while it runs: the **Console** at the bottom of the panel on the right shows the LDRAW-NOVA chat live. You see the AI's reply as it writes it, each tool it runs (`> build: …`), the tool output, and any error. When the run ends, the console keeps the last run's log until the node runs again. The queue log still gets the short progress notes.
 
 ## References: wire a Group into refs
 

@@ -137,6 +137,11 @@ class Addon:
                          {"image": self._image_b64(image), "caption": caption,
                           "title": title, "group": group})
 
+    def job_console(self, job_id, text):
+        """Add lines to the console in the job's node's panel: what it's
+        doing, as it goes. Text may hold several lines."""
+        return self.post(f"/addon/jobs/{job_id}/console", {"text": str(text)})
+
     def job_done(self, job_id, ok=True, message="", error="", output=None,
                  retry=None):
         """Answer a job. `output` is the file it made, for the next node;
