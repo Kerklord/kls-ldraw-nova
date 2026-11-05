@@ -143,7 +143,7 @@ def test_nearest_colour():
 def test_more_than_four_photos_go_in_batches(run):
     web, addon, _ = run(board(n_photos=6))
     assert [len(b["images"]) for _, b in web.sent] == [4, 2]
-    assert web.sent[0][1]["options"] == {"mode": "chat"}
+    assert web.sent[0][1]["options"] == {"mode": "plan", "permissions": "read_only"}
     assert "Reference photos 1-4 of 6" in web.sent[0][1]["text"]
     assert web.sent[1][1]["options"]["mode"] == "agent"
 
