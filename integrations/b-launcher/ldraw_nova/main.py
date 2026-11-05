@@ -15,12 +15,26 @@ import threading
 import time
 import urllib.parse
 
+import refs as references
 from nova_client import Nova, NovaError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ADDON_DIR = os.environ.get("BLAUNCHER_ADDON_DIR") or HERE
-SETTINGS_FILE = os.path.join(ADDON_DIR, "settings.json")
-STATE_FILE = os.path.join(ADDON_DIR, "state.json")
+
+
+def data_dir():
+    """Where settings live: outside the add-on's folder, because B-Launcher
+    deletes that folder when the add-on is reinstalled."""
+    if os.environ.get("LDRAW_NOVA_ADDON_DATA"):
+        return os.environ["LDRAW_NOVA_ADDON_DATA"]
+    if os.name == "nt" and os.environ.get("APPDATA"):
+        return os.path.join(os.environ["APPDATA"], "LDRAW-NOVA addon")
+    return os.path.join(os.path.expanduser("~"), ".config", "ldraw-nova-addon")
+
+
+DATA_DIR = data_dir()
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+STATE_FILE = os.path.join(DATA_DIR, "state.json")
 
 DEFAULT_SETTINGS = {
     "web_url": "http://localhost:8765",
@@ -46,6 +60,7 @@ def load_json(path, default):
 
 
 def save_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     partial = path + ".part"
     with open(partial, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2)
@@ -67,8 +82,12 @@ def free_path(path):
     return f"{stem}-v{n}{ext}"
 
 
-def target_path(output_field, folder, model_file):
-    """Where to save the model: the node's Save as, else the default folder."""
+def target_path(output_field, folder, model_file, title=""):
+    """Where to save the model: the node's Save as, else the default folder.
+    A group's title, when there is one, names the file in a folder."""
+    name = references.slug(title)
+    if name:
+        model_file = name + (os.path.splitext(model_file)[1] or ".mpd")
     output = (output_field or "").strip().strip('"')
     if output:
         if os.path.isdir(output) or output.endswith(("/", "\\")):
@@ -135,14 +154,22 @@ class Builder:
     def run(self, job):
         job_id = job["id"]
         fields = job.get("fields") or {}
+        note = lambda text: self.addon.job_note(job_id, text)
         prompt = (fields.get("prompt") or "").strip()
         if not prompt:
-            first = next(iter((job.get("inputs") or {}).values()), "")
-            prompt = str(first or "").strip() if not os.path.exists(str(first or "")) else ""
+            # Prompt text can also come from the node wired into "in".
+            wired = (job.get("inputs") or {}).get("in")
+            if isinstance(wired, str) and wired.strip() and not os.path.exists(wired.strip()):
+                prompt = wired.strip()
+        gathered = self.gather_refs(job, note)
+        prompt, summary = references.compose(prompt, gathered,
+                                             fields.get("notes") or references.NOTES_USE)
         if not prompt:
-            raise self.final("The node has no prompt. Type one in its Prompt field.")
-
-        note = lambda text: self.addon.job_note(job_id, text)
+            raise self.final("Nothing to build: the node has no prompt and no notes "
+                             "were wired into it.")
+        note("Sending " + (summary or "the prompt only"))
+        for why in gathered.skipped:
+            note("Left out " + why)
         ai_id, ai_name = self.resolve_ai(fields.get("ai"))
         plan_only = fields.get("mode") == MODE_PLAN
 
@@ -160,8 +187,27 @@ class Builder:
 
         before = set((self.nova.get_chat(chat_id).get("models") or {}).keys())
         note(f"Sending to LDRAW-NOVA ({ai_name or 'default AI'}), chat {chat_id}")
+        photos = gathered.photos
+        batches = [photos[i:i + references.PHOTOS_PER_MESSAGE]
+                   for i in range(0, len(photos), references.PHOTOS_PER_MESSAGE)] or [[]]
+        start = 1
+        for batch in batches[:-1]:
+            # The web app takes 4 pictures a message: earlier ones go first,
+            # as reference-only messages the AI just looks at.
+            end = start + len(batch) - 1
+            text = (f"Reference photos {start}-{end} of {len(photos)} for the LEGO build "
+                    "I'll ask for next. Note briefly what matters for building it; "
+                    "don't build anything yet.")
+            note(f"Sending reference photos {start}-{end}")
+            self.nova.send(chat_id, text, ai_id, {"mode": "chat"},
+                           [references.data_url(p) for p in batch])
+            error = self.follow(job_id, chat_id, note)
+            if error:
+                raise RuntimeError("Sending reference photos failed: " + error)
+            start = end + 1
         options = {"mode": "plan" if plan_only else "agent", "permissions": "full"}
-        self.nova.send(chat_id, prompt, ai_id, options)
+        self.nova.send(chat_id, prompt, ai_id, options,
+                       [references.data_url(p) for p in batches[-1]])
 
         error = self.follow(job_id, chat_id, note)
 
@@ -180,7 +226,8 @@ class Builder:
         if not model.get("model_url"):
             raise RuntimeError("The model the AI made can't be found in the web app.")
         model_file = model.get("file") or url_name(model["model_url"]) or "model.mpd"
-        path = target_path(fields.get("output"), self.settings.get("folder"), model_file)
+        path = target_path(fields.get("output"), self.settings.get("folder"), model_file,
+                           gathered.title)
         self.nova.download(model["model_url"], path)
         saved = [os.path.basename(path)]
         if truthy(fields.get("extras", "yes")):
@@ -194,6 +241,20 @@ class Builder:
         except Exception:
             pass
         return {"output": path, "message": summary}
+
+    def gather_refs(self, job, note):
+        """Photos, notes and colours wired into the refs input."""
+        wired = (job.get("inputs") or {}).get("refs")
+        board_id, node_id = job.get("board"), job.get("node")
+        if board_id and node_id and hasattr(self.addon, "get"):
+            try:
+                board = self.addon.get("/board?" + urllib.parse.urlencode({"id": board_id}))
+                if references.wired_sources(board, node_id):
+                    return references.gather(
+                        board, node_id, references.board_image_fetcher(self.addon, board_id))
+            except Exception as e:
+                note(f"Couldn't read the board ({e}); using the wired photos only.")
+        return references.from_paths(wired)
 
     def follow(self, job_id, chat_id, note):
         """Follow the turn until it ends. Returns the AI's error, or ""."""
@@ -321,8 +382,13 @@ def main():
     from blauncher_addon import Addon
 
     addon = Addon()
-    settings = {**DEFAULT_SETTINGS, **load_json(SETTINGS_FILE, {})}
-    builder = Builder(addon, settings, load_json(STATE_FILE, {"chats": {}}))
+    # Version 0.1 kept these in the add-on's own folder; carry them over once.
+    old_settings = load_json(os.path.join(ADDON_DIR, "settings.json"), {})
+    old_state = load_json(os.path.join(ADDON_DIR, "state.json"), {"chats": {}})
+    saved = load_json(SETTINGS_FILE, {}) if os.path.exists(SETTINGS_FILE) else old_settings
+    state = load_json(STATE_FILE, {"chats": {}}) if os.path.exists(STATE_FILE) else old_state
+    settings = {**DEFAULT_SETTINGS, **saved}
+    builder = Builder(addon, settings, state)
 
     def refresh(status_ok="Connected."):
         builder.nova = Nova(settings["web_url"])
