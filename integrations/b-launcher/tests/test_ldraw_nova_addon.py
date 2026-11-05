@@ -60,7 +60,12 @@ class FakeWeb:
                     self.send_header("Content-Type", "text/event-stream")
                     self.end_headers()
                     events = [("snapshot", {"running": True}),
-                              ("tool_start", {"name": "build"})]
+                              ("progress", {"summary": "Agent is reviewing the request."}),
+                              ("text", {"delta": "I'll build a "}),
+                              ("text", {"delta": "small castle.\nTwo towers"}),
+                              ("tool_start", {"name": "build", "arguments":
+                                              json.dumps({"command": "ldraw-agent build castle.plan.json"})}),
+                              ("tool_output", {"channel": "stdout", "delta": "wrote castle.mpd\n"})]
                     for ev, data in events:
                         self.wfile.write(f"event: {ev}\ndata: {json.dumps(data)}\n\n".encode())
                         self.wfile.flush()
@@ -318,3 +323,38 @@ def test_showing_the_picture_never_fails_the_build(tmp_path, monkeypatch):
     web, addon, builder = showing(tmp_path, monkeypatch, fail=True)
     assert builder.run(job())["output"].endswith("castle-v1.mpd")
     assert any("Couldn't show the picture" in n for n in addon.notes)
+
+
+class ConsoleAddon(FakeAddon):
+    def __init__(self, broken=False):
+        super().__init__()
+        self.console, self.broken = [], broken
+
+    def job_console(self, job_id, text):
+        if self.broken:
+            raise RuntimeError("404 not found")
+        self.console.extend(text.split("\n"))
+
+
+def test_the_chat_shows_in_the_nodes_console(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "STATE_FILE", str(tmp_path / "state.json"))
+    web, addon = FakeWeb(), ConsoleAddon()
+    builder = main.Builder(addon, {"web_url": web.url, "folder": str(tmp_path / "out")})
+    builder.run(job(extras="no"))
+    assert addon.console == ["… Agent is reviewing the request.",
+                             "NOVA:", "I'll build a small castle.", "Two towers",
+                             "> build: ldraw-agent build castle.plan.json",
+                             "wrote castle.mpd"]
+    assert "Agent is reviewing the request." in addon.notes   # progress note fixed
+
+
+def test_an_old_blauncher_without_a_console_still_builds(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "STATE_FILE", str(tmp_path / "state.json"))
+    web, addon = FakeWeb(), ConsoleAddon(broken=True)
+    builder = main.Builder(addon, {"web_url": web.url, "folder": str(tmp_path / "out")})
+    assert builder.run(job(extras="no"))["output"].endswith("castle-v1.mpd")
+
+
+def test_tool_lines():
+    assert main.tool_line({"name": "read_file", "arguments": '{"path": "a.json"}'}) == "> read_file: a.json"
+    assert main.tool_line({"name": "x", "arguments": "not json"}) == "> x"

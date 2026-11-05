@@ -54,6 +54,7 @@ CHAT_CONTINUE = "Continue this node's chat"
 MODE_PLAN = "Plan only"
 NOTE_EVERY = 10          # seconds between progress notes in the queue log
 STREAM_RETRIES = 5       # reconnects if the progress stream drops mid-build
+CONSOLE_EVERY = 1.0      # seconds between batches sent to the node's console
 
 
 # --- small helpers ------------------------------------------------------------
@@ -119,10 +120,88 @@ def describe(event, data):
         name = data.get("name") or "a tool"
         return f"Running {name}"
     if event == "progress":
-        return data.get("message") or data.get("phase")
+        return data.get("summary") or data.get("message") or data.get("phase")
     if event == "activity":
         return data.get("phase")
     return None
+
+
+def tool_line(data):
+    """'> build castle.plan.json' for a tool the AI started."""
+    name = data.get("name") or "a tool"
+    try:
+        args = json.loads(data.get("arguments") or "{}")
+    except (TypeError, ValueError):
+        args = {}
+    detail = ""
+    if isinstance(args, dict):
+        for key in ("command", "cmd", "path", "file", "query", "summary"):
+            if isinstance(args.get(key), str) and args[key].strip():
+                detail = args[key].strip().splitlines()[0]
+                break
+    return f"> {name}" + (f": {detail[:200]}" if detail else "")
+
+
+class ConsoleFeed:
+    """The LDRAW-NOVA chat, live, in the console of the node's panel.
+
+    The AI's reply arrives a few words at a time and tool output a chunk at
+    a time; both are gathered into whole lines and sent about once a second.
+    A B-Launcher too old to have a console just doesn't get one."""
+
+    def __init__(self, addon, job_id):
+        self.addon, self.job_id = addon, job_id
+        self.ok = hasattr(addon, "job_console")
+        self.lines, self.partial, self.kind, self.sent_at = [], "", "", 0.0
+
+    def event(self, event, data):
+        if not self.ok:
+            return
+        if event == "text":
+            self._stream("reply", data.get("delta") or "")
+        elif event == "tool_output":
+            self._stream("output", data.get("delta") or "")
+        elif event == "tool_start":
+            self.line(tool_line(data))
+        elif event == "progress":
+            text = data.get("summary") or data.get("message")
+            if text:
+                self.line("… " + text)
+        elif event == "turn_error":
+            self.line("Error: " + (data.get("message") or "the AI reported an error"))
+        self.flush()
+
+    def line(self, text):
+        self._end_partial()
+        self.lines.append(text)
+
+    def _stream(self, kind, text):
+        if kind != self.kind:
+            self._end_partial()
+            self.kind = kind
+            if kind == "reply":
+                self.lines.append("NOVA:")
+        *done, self.partial = (self.partial + text).split("\n")
+        self.lines.extend(line for line in done if line.strip())
+
+    def _end_partial(self):
+        if self.partial.strip():
+            self.lines.append(self.partial)
+        self.partial, self.kind = "", ""
+
+    def flush(self, force=False):
+        if not self.ok or not (self.lines or (force and self.partial)):
+            return
+        if not force and time.time() - self.sent_at < CONSOLE_EVERY:
+            return
+        if force:
+            self._end_partial()
+        batch, self.lines = self.lines, []
+        self.sent_at = time.time()
+        try:
+            self.addon.job_console(self.job_id, "\n".join(batch))
+        except Exception:
+            self.ok = False         # an older B-Launcher: carry on without
 
 
 # --- the job ----------------------------------------------------------------
@@ -271,6 +350,13 @@ class Builder:
 
     def follow(self, job_id, chat_id, note):
         """Follow the turn until it ends. Returns the AI's error, or ""."""
+        console = ConsoleFeed(self.addon, job_id)
+        try:
+            return self._follow(job_id, chat_id, note, console)
+        finally:
+            console.flush(force=True)
+
+    def _follow(self, job_id, chat_id, note, console):
         error, last_note, drops = "", 0.0, 0
         while True:
             try:
@@ -278,6 +364,7 @@ class Builder:
                     if self.addon.cancelled(job_id):
                         self.nova.cancel(chat_id)
                         raise self.stopped()
+                    console.event(event, data)
                     if event == "turn_error":
                         error = data.get("message") or "The AI reported an error."
                         note("Error: " + error)
