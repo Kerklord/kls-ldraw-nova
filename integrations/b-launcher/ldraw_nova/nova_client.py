@@ -13,7 +13,12 @@ import urllib.request
 
 
 class NovaError(Exception):
-    """The web app said no, or could not be reached."""
+    """The web app said no, or could not be reached. `status` is the HTTP
+    status when it answered, else None."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 class Nova:
@@ -34,7 +39,7 @@ class Nova:
                 detail = json.loads(e.read().decode("utf-8")).get("detail")
             except Exception:
                 detail = e.reason
-            raise NovaError(f"LDRAW-NOVA answered {e.code}: {detail}") from None
+            raise NovaError(f"LDRAW-NOVA answered {e.code}: {detail}", e.code) from None
         except (urllib.error.URLError, socket.timeout, OSError) as e:
             raise NovaError(f"Can't reach LDRAW-NOVA at {self.base} ({e}). "
                             "Is the web app running?") from None
@@ -59,11 +64,15 @@ class Nova:
         return self._json("GET", f"/api/chats/{urllib.parse.quote(chat_id)}")
 
     def chat_exists(self, chat_id):
+        """True or False when the web app says; raises when it can't be asked
+        (down, slow, an error), so a hiccup never passes for a deleted chat."""
         try:
             self.get_chat(chat_id)
             return True
-        except NovaError:
-            return False
+        except NovaError as e:
+            if e.status == 404:
+                return False
+            raise
 
     def send(self, chat_id, text, llm_model_id=None, options=None, images=()):
         body = {"text": text, "llm_model_id": llm_model_id,

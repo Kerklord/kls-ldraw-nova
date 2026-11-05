@@ -24,6 +24,7 @@ class FakeWeb:
     def __init__(self, make_model=True, error=None, slow=0.0):
         self.make_model, self.error, self.slow = make_model, error, slow
         self.chats, self.sent, self.cancelled = {}, [], []
+        self.chat_fails = 0          # GET /api/chats/<id> answers 500 this many times
         self.files = {"/files/generated/castle-v1.mpd": b"0 FILE castle.mpd\n",
                       "/files/generated/castle-v1.png": b"\x89PNG fake",
                       "/files/generated/castle-v1.bom.json": b"{}"}
@@ -80,6 +81,9 @@ class FakeWeb:
                     self.wfile.write(b"event: done\ndata: {}\n\n")
                     return
                 if p.startswith("/api/chats/"):
+                    if web.chat_fails:
+                        web.chat_fails -= 1
+                        return self._send(500, {"detail": "busy"})
                     chat = web.chats.get(p.split("/")[3])
                     if not chat:
                         return self._send(404, {"detail": "no such chat"})
@@ -90,7 +94,8 @@ class FakeWeb:
             def do_POST(self):
                 p, body = self.path, self._body()
                 if p == "/api/chats":
-                    chat_id = f"chat{len(web.chats) + 1}"
+                    web.made = getattr(web, "made", 0) + 1
+                    chat_id = f"chat{web.made}"
                     web.chats[chat_id] = {"id": chat_id, "models": {}, "messages": [],
                                           "llm": body.get("llm_model_id")}
                     return self._send(200, {"id": chat_id})
@@ -358,3 +363,38 @@ def test_an_old_blauncher_without_a_console_still_builds(tmp_path, monkeypatch):
 def test_tool_lines():
     assert main.tool_line({"name": "read_file", "arguments": '{"path": "a.json"}'}) == "> read_file: a.json"
     assert main.tool_line({"name": "x", "arguments": "not json"}) == "> x"
+
+
+def test_continue_says_what_it_did(setup):
+    web, addon, builder = setup()
+    builder.run(job(chat=main.CHAT_CONTINUE))
+    assert any("no earlier chat yet" in n for n in addon.notes)
+    builder.run(job(chat=main.CHAT_CONTINUE))
+    assert any(n == "Continuing this node's chat chat1" for n in addon.notes)
+    assert [c for c, _ in web.sent] == ["chat1", "chat1"]
+    del web.chats["chat1"]
+    builder.run(job(chat=main.CHAT_CONTINUE))
+    assert any("was deleted in LDRAW-NOVA" in n for n in addon.notes)
+    assert web.sent[-1][0] == "chat2"
+
+
+def test_a_busy_web_app_is_not_a_deleted_chat(setup, monkeypatch):
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    web, addon, builder = setup()
+    builder.run(job())
+    web.chat_fails = 2               # two hiccups, then it answers
+    builder.run(job(chat=main.CHAT_CONTINUE))
+    assert [c for c, _ in web.sent] == ["chat1", "chat1"]
+    web.chat_fails = 3               # still failing: stop rather than guess
+    with pytest.raises(RuntimeError, match="Couldn't check this node's last chat"):
+        builder.run(job(chat=main.CHAT_CONTINUE))
+    assert len(web.chats) == 1
+
+
+def test_the_chat_is_remembered_across_restarts(setup, tmp_path):
+    web, addon, builder = setup()
+    builder.run(job())
+    again = main.Builder(addon, {"web_url": web.url, "folder": str(tmp_path / "out")},
+                         main.load_json(main.STATE_FILE, {"chats": {}}))
+    again.run(job(chat=main.CHAT_CONTINUE))
+    assert [c for c, _ in web.sent] == ["chat1", "chat1"]

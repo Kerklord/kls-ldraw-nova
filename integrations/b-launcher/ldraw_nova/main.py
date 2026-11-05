@@ -221,8 +221,12 @@ class Builder:
         with self.lock:
             try:
                 save_json(STATE_FILE, self.state)
-            except OSError:
-                pass
+            except OSError as e:
+                # Without it, "Continue this node's chat" can't find the chat.
+                try:
+                    self.addon.log(f"Couldn't save which chat each node uses: {e}")
+                except Exception:
+                    pass
 
     def resolve_ai(self, choice):
         models, default_id = self.nova.ai_models()
@@ -264,9 +268,15 @@ class Builder:
         chat_id = None
         if fields.get("chat") == CHAT_CONTINUE:
             chat_id = self.state["chats"].get(node_key)
-            if chat_id and not self.nova.chat_exists(chat_id):
-                note("That node's last chat is gone; starting a new one.")
+            if not chat_id:
+                note("This node has no earlier chat yet; starting one. "
+                     "The next run continues it.")
+            elif not self.chat_still_there(chat_id):
+                note(f"This node's last chat ({chat_id}) was deleted in "
+                     "LDRAW-NOVA; starting a new one.")
                 chat_id = None
+            else:
+                note(f"Continuing this node's chat {chat_id}")
         if not chat_id:
             chat_id = self.nova.create_chat(ai_id)["id"]
         self.state["chats"][node_key] = chat_id
@@ -333,6 +343,20 @@ class Builder:
         except Exception:
             pass
         return {"output": path, "message": summary}
+
+    def chat_still_there(self, chat_id, tries=3):
+        """Whether the web app still has the chat. Asked a few times: a
+        busy web app is not a deleted chat, and guessing wrong would quietly
+        start a new chat when the node said to continue."""
+        for attempt in range(tries):
+            try:
+                return self.nova.chat_exists(chat_id)
+            except NovaError as e:
+                if attempt == tries - 1:
+                    raise RuntimeError(
+                        f"Couldn't check this node's last chat ({e}). Nothing was "
+                        "sent; run the node again.") from None
+                time.sleep(3)
 
     def gather_refs(self, job, note):
         """Photos, notes and colours wired into the refs input."""
