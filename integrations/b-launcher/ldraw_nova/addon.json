@@ -1,9 +1,9 @@
 {
   "id": "ldraw_nova",
   "name": "LDRAW-NOVA",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "KL",
-  "description": "Builds LEGO models with the LDRAW-NOVA web app from a board node and saves the .mpd where you choose. Wire a Group into its refs input to send its photos, notes and colours. Needs the LDRAW-NOVA web app running (http://localhost:8765 by default) and B-Launcher add-on guide 1.3. Standard library only.",
+  "description": "Builds LEGO models with the LDRAW-NOVA web app from a board node and saves the .mpd where you choose. Wire a Group into its refs input to send its photos, notes and colours. Needs the LDRAW-NOVA web app running (http://localhost:8765 by default) and B-Launcher add-on guide 1.4. Shows the finished snapshot in the node or on the board. Standard library only.",
   "entry": "main.py",
   "permissions": [
     "node_kinds",
@@ -94,6 +94,18 @@
           "label": "Also save snapshot and parts list",
           "kind": "bool",
           "default": "yes"
+        },
+        {
+          "key": "show",
+          "label": "Show the finished picture",
+          "kind": "choice",
+          "options": [
+            "In the node",
+            "On the board, in a group",
+            "Both",
+            "Don't show it"
+          ],
+          "default": "In the node"
         }
       ]
     }
