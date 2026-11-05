@@ -90,6 +90,12 @@ class FakeWeb:
                                           "llm": body.get("llm_model_id")}
                     return self._send(200, {"id": chat_id})
                 if p.endswith("/messages"):
+                    # As the real web app (model_catalog.validate_options).
+                    options = body.get("options") or {}
+                    if options.get("mode", "agent") not in ("plan", "agent"):
+                        return self._send(400, {"detail": "Unknown mode"})
+                    if options.get("permissions", "ask") not in ("ask", "full", "read_only"):
+                        return self._send(400, {"detail": "Unknown permission setting"})
                     web.sent.append((p.split("/")[3], body))
                     return self._send(202, {"started": True})
                 if p.endswith("/cancel"):
@@ -105,8 +111,8 @@ class FakeWeb:
         chat = self.chats[chat_id]
         chat["messages"].append({"role": "assistant", "content": "Here is the plan."})
         last = next((body for c, body in reversed(self.sent) if c == chat_id), {})
-        if (last.get("options") or {}).get("mode") == "chat":
-            return                      # a reference-only message builds nothing
+        if (last.get("options") or {}).get("mode") == "plan":
+            return                      # a plan or reference-only message builds nothing
         if self.make_model and chat_id not in self.cancelled:
             chat["models"][f"m{len(chat['models'])}"] = {
                 "id": f"m{len(chat['models'])}", "file": "castle-v1.mpd", "parts": 42,

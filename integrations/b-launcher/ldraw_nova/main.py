@@ -27,6 +27,7 @@ SHOW_GROUP = "On the board, in a group"
 SHOW_BOTH = "Both"
 SHOW_OFF = "Don't show it"
 RESULTS_GROUP = "LEGO builds"
+REFERENCE_OPTIONS = {"mode": "plan", "permissions": "read_only"}
 
 
 def data_dir():
@@ -206,7 +207,9 @@ class Builder:
                     "I'll ask for next. Note briefly what matters for building it; "
                     "don't build anything yet.")
             note(f"Sending reference photos {start}-{end}")
-            self.nova.send(chat_id, text, ai_id, {"mode": "chat"},
+            # The web app only knows "plan" and "agent"; plan + read-only
+            # lets the AI look at the photos without building anything.
+            self.nova.send(chat_id, text, ai_id, REFERENCE_OPTIONS,
                            [references.data_url(p) for p in batch])
             error = self.follow(job_id, chat_id, note)
             if error:
