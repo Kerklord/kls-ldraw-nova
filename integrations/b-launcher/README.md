@@ -6,8 +6,8 @@ LDRAW-NOVA web app, follows the build in the queue log, and saves the
 finished `.mpd` where you chose. Then it hands that file to the next node, so
 **LEGO build → Open in program (Stud.io)** opens the model when it's done.
 
-Needs B-Launcher 1.6 with add-on guide 1.2 or newer (dropdown fields, job
-outputs, cancel events), and the LDRAW-NOVA web app running. The web app is
+Needs B-Launcher 1.6 with add-on guide 1.3 or newer (dropdown fields, job
+outputs, cancel events, and the Group `photos` output), and the LDRAW-NOVA web app running. The web app is
 at http://localhost:8765 by default. The add-on uses only Python's standard
 library.
 
@@ -24,16 +24,44 @@ library.
 
 | Field | What it does |
 | --- | --- |
-| Prompt | What to build. Board values work, e.g. `{prompt}`, which you can set from B-Launcher Remote. |
+| Notes from refs | *Use notes when Prompt is empty* (default), *Add notes to my prompt*, or *Ignore notes*. |
+| Prompt | What to build. Leave it empty to use the notes from the wired group. Board values work, e.g. `{prompt}`, which you can set from B-Launcher Remote. |
 | AI | `Default` (the web app's default) or one of its models. Press **Refresh AI list** after changing models in the web app. |
 | Mode | `Build`, or `Plan only` to have the AI write a plan without building. The plan appears in the queue log and the chat. |
 | Chat | `New chat` each run, or `Continue this node's chat` to send a follow-up to the chat this node used last time. |
 | Save .mpd as | A file (`D:\LEGO\castle.mpd`) or a folder. Blank uses the panel's default folder. An existing file is never overwritten: it saves `castle-v2.mpd` instead. |
 | Also save snapshot and parts list | Saves the PNG preview and the parts list next to the `.mpd`. |
 
+## References: wire a Group into refs
+
+Wire a Group box's **photos** output (or single Reference nodes) into the
+node's **refs** input. The add-on reads the board and uses only:
+
+- **Photos**, top row first and left to right, including groups inside the
+  group. Captions go into the prompt as "Photo 2: side view". The web app
+  takes 4 pictures per message, so with more than 4 the earlier ones are sent
+  first as reference-only messages, then the build prompt with the last
+  ones. Up to 16 photos are sent. PNG, JPEG and WebP only, 5 MB each.
+- **Notes**, merged into one prompt in board order. A note's title becomes
+  its heading. Notes titled **Avoid**, **Parts** or **Colours** become rules
+  ("Avoid:", "Parts to use:", "Colour rules:") instead of description, and
+  are added even when the node has its own prompt.
+- **Colours nodes.** Each colour is matched to the nearest solid LDraw
+  colour (LDConfig.ldr, the same names Stud.io uses), e.g. "Dark Red (320)".
+
+Everything else in the group (sketches, render nodes...) is ignored. The
+group's title names the saved file (`Castle gate` → `castle-gate.mpd`) when
+**Save .mpd as** is empty or a folder. The queue log lists what was sent and
+anything left out.
+
+## Settings
+
+The panel's settings and each node's chat are kept in
+`%APPDATA%\LDRAW-NOVA addon`, outside the add-on's folder, so reinstalling
+the add-on keeps them.
+
 Pausing, removing or restarting the board stops the AI in the web app too.
-A failed build isn't retried automatically (`"retries": 0`). Fallback
-prompts come in a later version.
+A failed build isn't retried automatically (`"retries": 0`).
 
 ## Tests
 
