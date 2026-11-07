@@ -28,6 +28,9 @@ SHOW_GROUP = "On the board, in a group"
 SHOW_BOTH = "Both"
 SHOW_OFF = "Don't show it"
 RESULTS_GROUP = "LEGO builds"
+GROUP_EACH_RUN = "A new group each run"
+GROUP_PICKED = "Group: "     # "Group: Castle ideas" names one of your groups
+GROUPS_LISTED = 48
 REFERENCE_OPTIONS = {"mode": "plan", "permissions": "read_only"}
 
 
@@ -348,7 +351,8 @@ class Builder:
             saved += self.save_extras(model, model_file, path, note)
         parts = model.get("parts")
         summary = f"Saved {path}" + (f" ({parts} parts)" if parts else "")
-        self.show_result(job_id, show, model, path, parts, note)
+        self.show_result(job_id, show, model, path, parts, note,
+                         results_group(fields.get("group"), path))
         note(summary)
         try:
             self.addon.notify("LEGO build finished", os.path.basename(path))
@@ -462,7 +466,7 @@ class Builder:
                 note(f"Couldn't save {name}: {e}")
         return saved
 
-    def show_result(self, job_id, show, model, path, parts, note):
+    def show_result(self, job_id, show, model, path, parts, note, group=RESULTS_GROUP):
         """Put the finished snapshot in the node and/or on the board.
         Best effort: a build that saved its .mpd never fails over this."""
         if show == SHOW_OFF or not hasattr(self.addon, "job_preview"):
@@ -486,7 +490,7 @@ class Builder:
             caption = name + (f" ({parts} parts)" if parts else "")
             try:
                 self.addon.job_reference(job_id, image, caption=caption,
-                                         title=name, group=RESULTS_GROUP)
+                                         title=name, group=group)
             except Exception as e:
                 note(f"Couldn't put the picture on the board: {e}")
 
@@ -510,6 +514,45 @@ class Builder:
 def manifest_kinds():
     with open(os.path.join(HERE, "addon.json"), encoding="utf-8") as handle:
         return json.load(handle)["node_kinds"]
+
+
+def results_group(choice, path):
+    """The title of the group the finished picture goes into."""
+    choice = (choice or "").strip()
+    if choice == GROUP_EACH_RUN:
+        return os.path.splitext(os.path.basename(path))[0]   # castle-v2
+    if choice.startswith(GROUP_PICKED):
+        return choice[len(GROUP_PICKED):].strip() or RESULTS_GROUP
+    return choice or RESULTS_GROUP
+
+
+def group_options(titles):
+    options = [RESULTS_GROUP, GROUP_EACH_RUN]
+    for title in titles:
+        title = " ".join(str(title or "").split())
+        if not title or title == RESULTS_GROUP:
+            continue
+        option = GROUP_PICKED + (title if len(GROUP_PICKED + title) <= 80
+                                 else title[:79 - len(GROUP_PICKED)].rstrip() + "…")
+        if option not in options:
+            options.append(option)
+        if len(options) >= 2 + GROUPS_LISTED:
+            break
+    return options
+
+
+def board_group_titles(addon):
+    """The titles of the groups on every board, board by board."""
+    titles = []
+    boards = addon.get("/boards")
+    boards = boards.get("boards", []) if isinstance(boards, dict) else boards or []
+    for board in boards:
+        if not isinstance(board, dict) or not board.get("id"):
+            continue
+        detail = addon.get("/board?" + urllib.parse.urlencode({"id": board["id"]}))
+        titles += [g.get("title") for g in (detail or {}).get("groups") or []
+                   if isinstance(g, dict)]
+    return titles
 
 
 def chat_option(chat):
@@ -537,10 +580,17 @@ def chat_options(chats):
     return options
 
 
-def kinds_with_ai(names, chats=None):
-    """The node kinds with the AI dropdown listing these models, and the
-    Chat dropdown listing these web app chats (when given)."""
+def kinds_with_ai(names, chats=None, groups=None):
+    """The node kinds with the AI dropdown listing these models, the Chat
+    dropdown these web app chats and the Results group dropdown these board
+    groups (each when given)."""
     kinds = manifest_kinds()
+    if groups is not None:
+        for kind in kinds:
+            for entry in kind.get("fields", []):
+                if entry["key"] == "group":
+                    entry["options"] = group_options(groups)
+                    entry["default"] = RESULTS_GROUP
     if chats is not None:
         for kind in kinds:
             for entry in kind.get("fields", []):
@@ -602,7 +652,12 @@ def main():
             addon.log(f"Couldn't list the LDRAW-NOVA chats: {e}")
             chats = None
         try:
-            addon.add_node_kinds(kinds_with_ai(names, chats))
+            groups = board_group_titles(addon)
+        except Exception as e:
+            addon.log(f"Couldn't list the board groups: {e}")
+            groups = None
+        try:
+            addon.add_node_kinds(kinds_with_ai(names, chats, groups))
         except Exception as e:
             addon.log(f"Couldn't update the AI list on the node: {e}")
         addon.set_panel(panel(settings, f"{status_ok} {len(models)} AI model(s) found.", labels))

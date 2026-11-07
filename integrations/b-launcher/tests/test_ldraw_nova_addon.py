@@ -447,3 +447,35 @@ def test_nova_lists_chats(setup):
     web, addon, builder = setup()
     builder.run(job())
     assert [c["id"] for c in builder.nova.list_chats()] == ["chat1"]
+
+
+def test_results_group_choice():
+    path = "/out/castle-v2.mpd"
+    assert main.results_group("", path) == "LEGO builds"
+    assert main.results_group("LEGO builds", path) == "LEGO builds"
+    assert main.results_group(main.GROUP_EACH_RUN, path) == "castle-v2"
+    assert main.results_group("Group: Castle ideas", path) == "Castle ideas"
+
+
+def test_the_group_dropdown_lists_board_groups():
+    class Boards:
+        def get(self, path):
+            if path == "/boards":
+                return {"boards": [{"id": "b1"}, {"id": "b2"}]}
+            return {"b1": {"groups": [{"title": "Castle ideas"}, {"title": ""},
+                                      {"title": "LEGO builds"}]},
+                    "b2": {"groups": [{"title": "Castle ideas"}, {"title": "Y" * 90}]}
+                    }[path.split("id=")[1]]
+    titles = main.board_group_titles(Boards())
+    kinds = main.kinds_with_ai(["GPT-5"], None, titles)
+    group = next(f for f in kinds[0]["fields"] if f["key"] == "group")
+    assert group["options"][:3] == ["LEGO builds", main.GROUP_EACH_RUN, "Group: Castle ideas"]
+    assert len(group["options"]) == 4 and all(len(o) <= 80 for o in group["options"])
+    assert len(main.group_options([f"g{i}" for i in range(100)])) == 50
+
+
+def test_the_picture_goes_to_the_picked_group(tmp_path, monkeypatch):
+    web, addon, builder = showing(tmp_path, monkeypatch)
+    builder.run(job(show=main.SHOW_GROUP, group="Group: Castle ideas"))
+    builder.run(job(show=main.SHOW_GROUP, group=main.GROUP_EACH_RUN, extras="no"))
+    assert [r[4] for r in addon.references] == ["Castle ideas", "castle-v1-v2"]
