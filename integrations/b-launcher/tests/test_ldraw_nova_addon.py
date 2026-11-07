@@ -48,6 +48,10 @@ class FakeWeb:
 
             def do_GET(self):
                 p = self.path
+                if p == "/api/chats":
+                    return self._send(200, {"chats": [
+                        {"id": c["id"], "title": c.get("title", "New chat"), "updated_at": 0}
+                        for c in web.chats.values()]})
                 if p == "/api/llm-models":
                     return self._send(200, {"models": [
                         {"id": "c1", "model_name": "Claude Sonnet 5"},
@@ -398,3 +402,80 @@ def test_the_chat_is_remembered_across_restarts(setup, tmp_path):
                          main.load_json(main.STATE_FILE, {"chats": {}}))
     again.run(job(chat=main.CHAT_CONTINUE))
     assert [c for c, _ in web.sent] == ["chat1", "chat1"]
+
+
+def test_the_chat_dropdown_lists_the_web_apps_chats():
+    chats = [{"id": "20261105-142233-a1b2c3", "title": "A castle with two towers"},
+             {"id": "20261104-090000-ffffff", "title": "  X" * 60},
+             {"id": "bad id with spaces", "title": "skipped"}]
+    kinds = main.kinds_with_ai(["GPT-5"], chats)
+    chat = next(f for f in kinds[0]["fields"] if f["key"] == "chat")
+    assert chat["options"][:3] == [main.CHAT_NEW, main.CHAT_CONTINUE,
+                                   "A castle with two towers · 20261105-142233-a1b2c3"]
+    assert len(chat["options"]) == 4
+    assert all(len(o) <= 80 for o in chat["options"])
+    assert chat["options"][3].endswith("… · 20261104-090000-ffffff")
+    many = [{"id": f"c{i:04d}", "title": "t"} for i in range(100)]
+    assert len(main.chat_options(many)) == 50
+    # Without a chat list (web app down) the manifest's two options stay.
+    kinds = main.kinds_with_ai(["GPT-5"])
+    chat = next(f for f in kinds[0]["fields"] if f["key"] == "chat")
+    assert chat["options"] == [main.CHAT_NEW, main.CHAT_CONTINUE]
+
+
+def test_a_picked_chat_is_continued(setup):
+    web, addon, builder = setup()
+    builder.run(job())                                     # makes chat1
+    builder.run(job())                                     # makes chat2
+    picked = main.chat_option({"id": "chat1", "title": "My castle"})
+    builder.run(job(chat=picked))
+    assert [c for c, _ in web.sent] == ["chat1", "chat2", "chat1"]
+    assert "Continuing the chat you picked, chat1" in addon.notes
+    # ...and that node's Continue now carries on with the picked chat.
+    builder.run(job(chat=main.CHAT_CONTINUE))
+    assert web.sent[-1][0] == "chat1"
+
+
+def test_a_picked_chat_that_was_deleted_stops_the_node(setup):
+    web, addon, builder = setup()
+    with pytest.raises(JobStopped, match="was deleted"):
+        builder.run(job(chat=main.chat_option({"id": "gone99", "title": "Old"})))
+    assert web.chats == {}
+
+
+def test_nova_lists_chats(setup):
+    web, addon, builder = setup()
+    builder.run(job())
+    assert [c["id"] for c in builder.nova.list_chats()] == ["chat1"]
+
+
+def test_results_group_choice():
+    path = "/out/castle-v2.mpd"
+    assert main.results_group("", path) == "LEGO builds"
+    assert main.results_group("LEGO builds", path) == "LEGO builds"
+    assert main.results_group(main.GROUP_EACH_RUN, path) == "castle-v2"
+    assert main.results_group("Group: Castle ideas", path) == "Castle ideas"
+
+
+def test_the_group_dropdown_lists_board_groups():
+    class Boards:
+        def get(self, path):
+            if path == "/boards":
+                return {"boards": [{"id": "b1"}, {"id": "b2"}]}
+            return {"b1": {"groups": [{"title": "Castle ideas"}, {"title": ""},
+                                      {"title": "LEGO builds"}]},
+                    "b2": {"groups": [{"title": "Castle ideas"}, {"title": "Y" * 90}]}
+                    }[path.split("id=")[1]]
+    titles = main.board_group_titles(Boards())
+    kinds = main.kinds_with_ai(["GPT-5"], None, titles)
+    group = next(f for f in kinds[0]["fields"] if f["key"] == "group")
+    assert group["options"][:3] == ["LEGO builds", main.GROUP_EACH_RUN, "Group: Castle ideas"]
+    assert len(group["options"]) == 4 and all(len(o) <= 80 for o in group["options"])
+    assert len(main.group_options([f"g{i}" for i in range(100)])) == 50
+
+
+def test_the_picture_goes_to_the_picked_group(tmp_path, monkeypatch):
+    web, addon, builder = showing(tmp_path, monkeypatch)
+    builder.run(job(show=main.SHOW_GROUP, group="Group: Castle ideas"))
+    builder.run(job(show=main.SHOW_GROUP, group=main.GROUP_EACH_RUN, extras="no"))
+    assert [r[4] for r in addon.references] == ["Castle ideas", "castle-v1-v2"]

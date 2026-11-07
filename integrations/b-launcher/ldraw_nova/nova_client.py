@@ -60,6 +60,12 @@ class Nova:
     def create_chat(self, llm_model_id=None):
         return self._json("POST", "/api/chats", {"llm_model_id": llm_model_id})
 
+    def list_chats(self):
+        """The web app's chats, most recently used first: id, title, ..."""
+        data = self._json("GET", "/api/chats")
+        chats = data if isinstance(data, list) else (data or {}).get("chats") or []
+        return [c for c in chats if isinstance(c, dict) and c.get("id")]
+
     def get_chat(self, chat_id):
         return self._json("GET", f"/api/chats/{urllib.parse.quote(chat_id)}")
 

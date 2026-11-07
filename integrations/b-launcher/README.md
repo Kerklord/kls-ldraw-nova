@@ -28,10 +28,15 @@ library.
 | Prompt | What to build. Leave it empty to use the notes from the wired group. Board values work, e.g. `{prompt}`, which you can set from B-Launcher Remote. |
 | AI | `Default` (the web app's default) or one of its models. Press **Refresh AI list** after changing models in the web app. |
 | Mode | `Build`, or `Plan only` to have the AI write a plan without building. The plan appears in the queue log and the chat. |
-| Chat | `New chat` each run, or `Continue this node's chat` to send a follow-up to the chat this node used last time. |
+| Chat | `New chat` each run; `Continue this node's chat` to send a follow-up to the chat this node used last time; or pick one of your LDRAW-NOVA chats by name (the 48 most recent, listed as *title · id*) to carry on that chat, even one you started in the web app. The list refreshes when the add-on starts, after every run, and when you press Refresh in the add-on's panel. A picked chat that was deleted stops the node rather than starting a new one. |
 | Save .mpd as | A file (`D:\LEGO\castle.mpd`) or a folder. Blank uses the panel's default folder. An existing file is never overwritten: it saves `castle-v2.mpd` instead. |
 | Also save snapshot and parts list | Saves the PNG preview and the parts list next to the `.mpd`. |
 | Show the finished picture | `In the node` (default) shows the model's snapshot inside the node; double-click the node to see it full size, Escape closes it. `On the board, in a group` adds the snapshot as a Reference, captioned with the file name and part count, in a group called **LEGO builds** beside the node (made the first time, reused after). `Both`, or `Don't show it`. Works even when the snapshot isn't saved to disk. |
+| Results group | Where *On the board, in a group* puts the picture: **LEGO builds** (made beside the node the first time, reused after), *A new group each run* (named after the saved file, e.g. `castle-v2`), or one of your groups by name (*Group: Castle ideas*). The list of groups refreshes when the add-on starts, after every run, and when you press Refresh in the add-on's panel. A group you pick that isn't on the node's board is made there. |
+
+## Skipping the node
+
+Tick **Ignore this node** at the top of its panel (B-Launcher with guide 1.5 or newer, from the version that adds that box) and a board run skips it, carrying on as if it had run. It's the same as *Switch it off* on the node's right-click menu.
 
 ## Watching it work
 
