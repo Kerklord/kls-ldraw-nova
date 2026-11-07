@@ -11,6 +11,7 @@ and fills the node's AI dropdown with the models set up in the web app.
 """
 import json
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -51,6 +52,10 @@ DEFAULT_SETTINGS = {
 AI_DEFAULT = "Default"
 CHAT_NEW = "New chat"
 CHAT_CONTINUE = "Continue this node's chat"
+CHATS_LISTED = 48        # B-Launcher allows 50 options; New and Continue take two
+# A picked chat reads "Castle with two towers · 20261105-142233-a1b2c3": its
+# id rides in the option itself, so it still works after the list changes.
+CHAT_ID_IN_OPTION = re.compile(r" · ([A-Za-z0-9_.-]{3,40})$")
 MODE_PLAN = "Plan only"
 NOTE_EVERY = 10          # seconds between progress notes in the queue log
 STREAM_RETRIES = 5       # reconnects if the progress stream drops mid-build
@@ -266,7 +271,14 @@ class Builder:
 
         node_key = f"{job.get('board', '')}/{job.get('node', '')}"
         chat_id = None
-        if fields.get("chat") == CHAT_CONTINUE:
+        picked = CHAT_ID_IN_OPTION.search(fields.get("chat") or "")
+        if picked:
+            chat_id = picked.group(1)
+            if not self.chat_still_there(chat_id):
+                raise self.final(f"The chat you picked ({chat_id}) was deleted in "
+                                 "LDRAW-NOVA. Pick another one, or New chat.")
+            note(f"Continuing the chat you picked, {chat_id}")
+        elif fields.get("chat") == CHAT_CONTINUE:
             chat_id = self.state["chats"].get(node_key)
             if not chat_id:
                 note("This node has no earlier chat yet; starting one. "
@@ -500,9 +512,41 @@ def manifest_kinds():
         return json.load(handle)["node_kinds"]
 
 
-def kinds_with_ai(names):
-    """The node kinds with the AI dropdown listing these models."""
+def chat_option(chat):
+    """How one web app chat reads in the node's Chat dropdown (80 chars max)."""
+    chat_id = str(chat["id"])
+    title = " ".join(str(chat.get("title") or "").split())
+    if not title or title == CHAT_NEW:      # the web app's name until a first message
+        title = "Untitled chat"
+    room = 80 - len(" · ") - len(chat_id)
+    if len(title) > room:
+        title = title[:room - 1].rstrip() + "…"
+    return f"{title} · {chat_id}"
+
+
+def chat_options(chats):
+    options = [CHAT_NEW, CHAT_CONTINUE]
+    for chat in chats:
+        if len(options) >= 2 + CHATS_LISTED:
+            break
+        if not CHAT_ID_IN_OPTION.search(" · " + str(chat.get("id") or "")):
+            continue                 # not an id the option could carry
+        option = chat_option(chat)
+        if option not in options:
+            options.append(option)
+    return options
+
+
+def kinds_with_ai(names, chats=None):
+    """The node kinds with the AI dropdown listing these models, and the
+    Chat dropdown listing these web app chats (when given)."""
     kinds = manifest_kinds()
+    if chats is not None:
+        for kind in kinds:
+            for entry in kind.get("fields", []):
+                if entry["key"] == "chat":
+                    entry["options"] = chat_options(chats)
+                    entry["default"] = CHAT_NEW
     # B-Launcher wants 1-50 distinct options of at most 80 characters.
     options = list(dict.fromkeys(
         [AI_DEFAULT] + [str(n).strip()[:80] for n in names if n and str(n).strip()]))[:50]
@@ -553,7 +597,12 @@ def main():
         labels = [n + ("  (default)" if m["id"] == default_id else "")
                   for n, m in zip(names, models)]
         try:
-            addon.add_node_kinds(kinds_with_ai(names))
+            chats = builder.nova.list_chats()
+        except NovaError as e:
+            addon.log(f"Couldn't list the LDRAW-NOVA chats: {e}")
+            chats = None
+        try:
+            addon.add_node_kinds(kinds_with_ai(names, chats))
         except Exception as e:
             addon.log(f"Couldn't update the AI list on the node: {e}")
         addon.set_panel(panel(settings, f"{status_ok} {len(models)} AI model(s) found.", labels))
@@ -576,7 +625,11 @@ def main():
     def job(event):
         if event.get("node_kind") != "lego_build":
             raise RuntimeError(f"Unknown node {event.get('node_kind')!r}")
-        return builder.run(event)
+        try:
+            return builder.run(event)
+        finally:
+            # A run may have started a chat: list it in the Chat dropdown.
+            threading.Thread(target=refresh, daemon=True).start()
 
     addon.set_panel(panel(settings))
     threading.Thread(target=refresh, daemon=True).start()
