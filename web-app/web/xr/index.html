@@ -1,0 +1,80 @@
+<!doctype html>
+<!--
+  LDraw mixed-reality viewer (WebXR, Meta Quest 3): /xr/?model=<url of an .ldr/.mpd>[&parts=N]
+  Built with Meta's Immersive Web SDK on three.js (see web/xr and README.md).
+  Options: &stats=1 (show performance), &fps=72|90, &scale=<framebuffer scale, 1.0>,
+           &occlusion=hard|soft|minmax|off (real things hiding the model; hard by default),
+           &emulate=quest3 (emulated headset, for desktop testing).
+  Read in the headset's browser too: large type, strong contrast, few words.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>LDraw MR</title>
+<style>
+  :root { --bg: #f2f2f2; --bar: rgba(255,255,255,.95); --fg: #111113; --muted: #3f3f46; --line: #d4d4d8;
+          --key: #e4e4e7; --accent: #111113; --accent-fg: #fff; --danger: #b42318; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bar: rgba(24,24,27,.95); --fg: #fafafa; --muted: #d4d4d8; --line: #3f3f46;
+            --key: #3f3f46; --accent: #fafafa; --accent-fg: #111113; --danger: #fda29b; }
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+               font: 18px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #scene-container { position: fixed; inset: 0; }
+  .bar { position: fixed; left: 0; right: 0; display: flex; gap: 14px; align-items: center; padding: 12px 18px;
+         background: var(--bar); backdrop-filter: blur(6px); z-index: 2; }
+  #top { top: 0; border-bottom: 1px solid var(--line); }
+  #title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; margin-right: auto; }
+  #title strong { font-weight: 700; }
+  #parts { color: var(--muted); }
+  #bottom { bottom: 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  #status { margin-right: auto; font-size: 20px; font-weight: 600; }
+  #status.error { color: var(--danger); font-weight: 500; font-size: 18px; }
+  #stats { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; width: 100%; }
+  #stats:empty { display: none; }
+  #xr-hint { width: 100%; color: var(--danger); font-weight: 600; }
+  #xr-hint a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  #xr-hint .aside { display: block; color: var(--muted); font-weight: 400; font-size: 16px; }
+  #enter { font: inherit; font-size: 22px; font-weight: 700; min-height: 56px; padding: 10px 34px; border-radius: 14px; cursor: pointer;
+           border: 2px solid var(--accent); background: var(--accent); color: var(--accent-fg); }
+  #enter:disabled { opacity: .4; cursor: default; }
+  #help { position: fixed; top: 74px; right: 18px; width: 360px; padding: 16px 20px 18px; border-radius: 14px;
+          background: var(--bar); border: 1px solid var(--line); z-index: 2; box-shadow: 0 6px 24px rgba(0,0,0,.12); }
+  #help h2 { margin: 0 0 8px; font-size: 20px; }
+  #help ul { list-style: none; margin: 0; padding: 0; }
+  #help li { display: flex; align-items: center; gap: 12px; padding: 5px 0; }
+  #help .keys { flex: 0 0 152px; display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  #help li > b { font-size: 19px; }
+  kbd { font: inherit; font-size: 16px; font-weight: 700; color: var(--fg); background: var(--key);
+        border-radius: 7px; padding: 2px 9px; white-space: nowrap; }
+  #help p { margin: 12px 0 0; color: var(--muted); font-size: 16px; }
+  @media (max-width: 760px) { #help { display: none; } }
+</style>
+</head>
+<body>
+  <div id="scene-container"></div>
+  <div id="top" class="bar">
+    <span id="title"><strong id="file">LDraw MR</strong><span id="parts"></span></span>
+  </div>
+  <div id="help">
+    <h2>Controls</h2>
+    <ul>
+      <li><span class="keys"><kbd>Trigger</kbd></span><b>Place</b></li>
+      <li><span class="keys"><kbd>Hold trigger</kbd></span><b>Move</b></li>
+      <li><span class="keys"><kbd>Stick ↕</kbd></span><b>Resize</b></li>
+      <li><span class="keys"><kbd>Stick ↔</kbd></span><b>Rotate</b></li>
+      <li><span class="keys"><kbd>Y</kbd> or <kbd>B</kbd></span><b>Menu</b></li>
+    </ul>
+    <p>Aim at a table or the floor to place the model. Aim at the model to move, resize or rotate it.</p>
+  </div>
+  <div id="bottom" class="bar">
+    <span id="status">Loading…</span>
+    <button id="enter" disabled>Enter MR</button>
+    <div id="xr-hint" hidden></div>
+    <div id="stats"></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
