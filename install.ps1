@@ -1,7 +1,7 @@
 # One-command installer for ldraw-nova on Windows.
 #
 # Double-click Install-LDRAW-NOVA.bat, or open PowerShell and run:
-#   irm https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/master/install.ps1 | iex
 # or, from a downloaded copy:
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
@@ -21,7 +21,7 @@ param(
     [string]$Repo = "",          # fork | original | any GitHub URL
     [string]$Dir = "~/ldraw-nova",           # terminal mode: folder inside WSL
     [string]$WebDir = "",        # web mode: Windows folder (default %USERPROFILE%\LDRAW-NOVA)
-    [string]$DockerRepo = "https://github.com/anteloc/ldraw-nova-docker",
+    [string]$DockerRepo = "",    # web mode: separate web app repository (default: the web-app folder of -Repo)
     [string]$Release = "",       # web mode: release tag such as v0.6.0 (default: the newest one)
     [string]$LDraw = "",         # terminal mode: folder containing parts\ and p\, or complete.zip
     [string]$Distro = "Ubuntu",
@@ -31,6 +31,7 @@ param(
     [switch]$NoBuild,            # web mode: set everything up but skip the Docker build
     [switch]$Update,             # update an existing install to the latest version (keeps a backup)
     [switch]$Revert,             # switch back to a version saved by -Update
+    [switch]$NoSelfUpdate,       # -Update: don't fetch the newest copy of this script first
     [int]$KeepVersions = 3,      # how many previous versions -Update keeps
     [switch]$Yes,
     [switch]$FromBat,            # set by Install-LDRAW-NOVA.bat: report status through the exit code
@@ -39,10 +40,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $DirGiven = $PSBoundParameters.ContainsKey("Dir")
-$ForkRepo = "https://github.com/Kerklord/ldraw-nova.git"
+$ScriptParams = $PSBoundParameters
+$ForkRepo = "https://github.com/Kerklord/kls-ldraw-nova.git"
 $OriginalRepo = "https://github.com/anteloc/ldraw-nova.git"
-$InstallerUrl = "https://raw.githubusercontent.com/Kerklord/ldraw-nova/$InstallerRef/install.sh"
-$ManagerUrl = "https://raw.githubusercontent.com/Kerklord/ldraw-nova/$InstallerRef/install.ps1"
+$OriginalDockerRepo = "https://github.com/anteloc/ldraw-nova-docker"   # only used with the original tools
+$OldForkRepo = "https://github.com/Kerklord/ldraw-nova.git"            # this repository before its rename
+$InstallerUrl = "https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/$InstallerRef/install.sh"
+$ManagerUrl = "https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/$InstallerRef/install.ps1"
 $ManagerName = "ldraw-nova-manager.ps1"   # copy of this script kept in the web app folder
 $ConfigName = "ldraw-nova-install.json"
 $ImageName = "ldraw-nova-app"
@@ -191,10 +195,30 @@ function Get-ReleaseTags($url) {
 }
 
 # The web app and the tools must come from the same release: newer tools code is often
-# ahead of the newest web app and breaks it. Picks that release ($Release, or the newest
-# one both projects have) and returns the two commits. The tools come from $novaUrl when
-# it has the tag, otherwise from the original repository.
+# ahead of the newest web app and breaks it.
+#
+# Default (no $dockerUrl): your repository ships both. Each release tag (v0.6.1, ...)
+# points at a commit with the matching tools and the web app in its web-app folder, so
+# one tag always pairs them. Picks $Release, or the newest tag of $novaUrl.
+#
+# With $dockerUrl (or the original tools): the web app comes from that separate
+# repository. Picks the newest release both have; the tools come from $novaUrl when it
+# has the tag, otherwise from the original repository.
 function Resolve-WebRelease($novaUrl, $dockerUrl) {
+    if (-not $dockerUrl -and $novaUrl -ne $OriginalRepo) {
+        $tags = Get-ReleaseTags $novaUrl
+        if ($Release) {
+            if ($tags -notcontains $Release) { Fail "$novaUrl has no release $Release. Available: $($tags -join ', ')" }
+            $tag = $Release
+        } else {
+            $tag = $tags[0]
+            if (-not $tag) { Fail "$novaUrl has no release tags yet (such as v0.6.1), so there is no web app version to install." }
+        }
+        $nova = Get-RepoInfo $novaUrl $tag
+        $nova.Chosen = $novaUrl
+        return @{ Tag = $tag; Nova = $nova; Docker = @{ Url = ""; Bundled = $true; Branch = $tag; Sha = $nova.Sha } }
+    }
+    if (-not $dockerUrl) { $dockerUrl = $OriginalDockerRepo }
     $dockerTags = Get-ReleaseTags $dockerUrl
     $originalTags = Get-ReleaseTags $OriginalRepo
     $chosenTags = if ($novaUrl -eq $OriginalRepo) { $originalTags } else { Get-ReleaseTags $novaUrl }
@@ -237,6 +261,33 @@ function Save-RepoCode($info, $dest) {
     Remove-Item -LiteralPath $tmp -Recurse -Force
     Remove-Item -LiteralPath $zip -Force
     Ok "$($info.Owner)/$($info.Name) $short ready"
+}
+
+# Puts the code of $pair (from Resolve-WebRelease) into $dest\ldraw-nova and
+# $dest\ldraw-nova-docker, the side-by-side layout docker-compose.yml expects.
+function Save-WebCode($pair, $dest) {
+    $novaDest = Join-Path $dest "ldraw-nova"
+    $dockerDest = Join-Path $dest "ldraw-nova-docker"
+    Save-RepoCode $pair.Nova $novaDest
+    if (-not $pair.Docker.Bundled) { Save-RepoCode $pair.Docker $dockerDest; return }
+    $bundled = Join-Path $novaDest "web-app"
+    if (-not (Test-Path -LiteralPath (Join-Path $bundled "docker-compose.yml"))) {
+        Fail "Release $($pair.Tag) of $($pair.Nova.Chosen) has no web-app folder. Web app releases are tagged on the release branch (see RELEASES.md)."
+    }
+    if (Test-Path -LiteralPath $dockerDest) { Remove-Item -LiteralPath $dockerDest -Recurse -Force }
+    Move-Item -LiteralPath $bundled -Destination $dockerDest
+    Ok "Web app from $($pair.Nova.Name) $($pair.Tag) ready"
+}
+
+# Older installs saved the repository's old name and the original author's web app.
+# Your repository now ships its own web app, so switch those over.
+function Update-SavedRepos($config) {
+    if (-not $config) { return }
+    if ($config.repo -eq $OldForkRepo -or $config.repo -eq $OldForkRepo.Replace(".git", "")) { $config.repo = $ForkRepo }
+    if ($config.repo -ne $OriginalRepo -and $config.dockerRepo -eq $OriginalDockerRepo) {
+        $config.dockerRepo = ""
+        Ok "The web app now comes from your repository ($($config.repo))"
+    }
 }
 
 function Read-WebConfig($root) {
@@ -328,9 +379,11 @@ function Update-WebApp($root) {
     Step "Updating the web app in $root"
     $config = Read-WebConfig $root
     if (-not (Test-Path -LiteralPath (Join-Path $root "ldraw-nova-docker"))) { Fail "No web app found in $root. Run the installer first." }
+    Update-SavedRepos $config
     $repoUrl = $ForkRepo; $dockerUrl = $DockerRepo
     if ($config) { $repoUrl = $config.repo; $dockerUrl = $config.dockerRepo }
     if ($Repo) { $repoUrl = $Repo }
+    if ($DockerRepo) { $dockerUrl = $DockerRepo }
     Start-DockerOrFail
     $pair = Resolve-WebRelease $repoUrl $dockerUrl
     $nova = $pair.Nova; $docker = $pair.Docker
@@ -341,8 +394,7 @@ function Update-WebApp($root) {
     $stamp = New-Stamp $root
     $staging = Join-Path $root ".staging"
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
-    Save-RepoCode $nova (Join-Path $staging "ldraw-nova")
-    Save-RepoCode $docker (Join-Path $staging "ldraw-nova-docker")
+    Save-WebCode $pair $staging
 
     # Keep the running version's image under a version tag, so a revert needs no rebuild.
     if (Test-ImageExists $ImageName) { & docker image tag $ImageName "${ImageName}:v-$stamp" | Out-Null }
@@ -361,8 +413,6 @@ function Update-WebApp($root) {
     Remove-Item -LiteralPath $staging -Recurse -Force
     Save-WebConfig $root $nova $docker
     if (-not (Invoke-Compose $root @("up", "-d"))) { Fail "The new version did not start. Use the 'Revert LDRAW-NOVA update' shortcut to go back." }
-    $newManager = Join-Path $root "ldraw-nova\install.ps1"
-    if (Test-Path -LiteralPath $newManager) { Copy-Item -LiteralPath $newManager -Destination (Join-Path $root $ManagerName) -Force }
     Ok "Updated to release $($pair.Tag). The previous version is saved as $stamp."
 
     $old = @(Get-Backups $root | Select-Object -Skip $KeepVersions)
@@ -459,11 +509,35 @@ Write-Host "LDRAW-NOVA stopped."
 Start-Sleep -Seconds 2
 '@
 
+# Fetches the newest copy of this script into $root. True when it differs from the
+# running one. Offline or on any error, carries on with the running copy.
+function Update-Manager($root) {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) "ldraw-nova-manager-new.ps1"
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $ManagerUrl -OutFile $tmp
+        if ($PSCommandPath -and (Get-FileHash -LiteralPath $tmp).Hash -eq (Get-FileHash -LiteralPath $PSCommandPath).Hash) { return $false }
+        Copy-Item -LiteralPath $tmp -Destination (Join-Path $root $ManagerName) -Force
+        Ok "Using the newest installer"
+        return $true
+    } catch {
+        Warn "Could not check for a newer installer ($($_.Exception.Message)); using this one."
+        return $false
+    } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+}
+
 function Invoke-Maintenance {
     $root = $WebDir
     if (-not $root) { $root = Join-Path $env:USERPROFILE "LDRAW-NOVA" }
     if (-not (Test-Path -LiteralPath $root)) { Fail "No LDRAW-NOVA web app found in $root." }
     $root = (Resolve-Path -LiteralPath $root).Path
+    if ($Update -and -not $NoSelfUpdate -and (Update-Manager $root)) {
+        # Run the newest installer for this update, so installer fixes reach the Update shortcut.
+        $passed = @("-Update", "-WebDir", $root, "-NoSelfUpdate")
+        foreach ($k in @("Repo", "DockerRepo", "Release")) { if ($ScriptParams.ContainsKey($k)) { $passed += @("-$k", (Get-Variable $k -ValueOnly)) } }
+        foreach ($k in @("Yes", "FromBat")) { if ($ScriptParams.ContainsKey($k)) { $passed += "-$k" } }
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root $ManagerName) @passed
+        exit $LASTEXITCODE
+    }
     try {
         if ($Update) { Update-WebApp $root } else { Undo-WebUpdate $root }
     } finally {
@@ -592,8 +666,7 @@ if ($wantWeb) {
     $existingData = Join-Path $webRoot "ldraw-nova-docker\data"
     $keepData = Join-Path $webRoot ".data-hold"
     if (Test-Path -LiteralPath $existingData) { Move-Item -LiteralPath $existingData -Destination $keepData }
-    Save-RepoCode $novaInfo (Join-Path $webRoot "ldraw-nova")
-    Save-RepoCode $dockerInfo (Join-Path $webRoot "ldraw-nova-docker")
+    Save-WebCode $pair $webRoot
     if (Test-Path -LiteralPath $keepData) {
         Remove-Item -LiteralPath $existingData -Recurse -Force
         Move-Item -LiteralPath $keepData -Destination $existingData

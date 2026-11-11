@@ -2,14 +2,14 @@
 # shellcheck disable=SC2088,SC2015
 # One-command installer for ldraw-nova on Linux, macOS and WSL (Windows).
 #
-#   curl -fsSL https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/master/install.sh | bash
 #
 # It checks each requirement and installs only what is missing, clones the
 # repository, points it at your LDraw parts library, runs ./setup.sh and a
 # test build. It is safe to run again. Run with --help for options.
 set -euo pipefail
 
-DEFAULT_REPO="https://github.com/Kerklord/ldraw-nova.git"
+DEFAULT_REPO="https://github.com/Kerklord/kls-ldraw-nova.git"
 ORIGINAL_REPO="https://github.com/anteloc/ldraw-nova.git"
 XRAY_REPO="https://github.com/anteloc/ldraw-xray.git"
 LEOCAD_MIN="23.03"   # first release with --export-csv, needed for BOM comparison
@@ -391,7 +391,7 @@ fi
 if [ ! -f "$SELF_COPY" ]; then # e.g. when run through curl | bash
   mkdir -p "$(dirname "$SELF_COPY")"
   if [ -f "$DIR/install.sh" ]; then cp "$DIR/install.sh" "$SELF_COPY"
-  else curl -fsSL https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.sh -o "$SELF_COPY" \
+  else curl -fsSL https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/master/install.sh -o "$SELF_COPY" \
     || warn "Could not save a copy of the installer; updates will need: curl ... | bash -s -- --update"; fi
 fi
 

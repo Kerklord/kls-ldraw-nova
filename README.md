@@ -6,24 +6,24 @@ Build LEGO models with an AI agent, ordinary JSON plans and LDraw parts. The too
 
 ## Quick install
 
-**Windows.** Download [`Install-LDRAW-NOVA.bat`](https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/Install-LDRAW-NOVA.bat) (right-click, *Save link as*) and double-click it. If Windows warns about a downloaded file, choose *More info* then *Run anyway*. It asks how you want to use LDRAW-NOVA:
+**Windows.** Download [`Install-LDRAW-NOVA.bat`](https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/master/Install-LDRAW-NOVA.bat) (right-click, *Save link as*) and double-click it. If Windows warns about a downloaded file, choose *More info* then *Run anyway*. It asks how you want to use LDRAW-NOVA:
 
 | Mode | What you get | What it installs |
 |---|---|---|
-| **Web app** (default) | A chat page in your browser with a 3D viewer and VR. Sign in to Claude or ChatGPT in the app's Settings and add an agent. | Docker Desktop (via winget), this repository and [ldraw-nova-docker](https://github.com/anteloc/ldraw-nova-docker) in `%USERPROFILE%\LDRAW-NOVA` (or a folder you pick), then builds the app. The first build takes 15 to 40 minutes and about 5 GB; the image brings its own LDraw library. |
+| **Web app** (default) | A chat page in your browser with a 3D viewer and VR. Sign in to Claude or ChatGPT in the app's Settings and add an agent. | Docker Desktop (via winget), then the newest release of this repository (the tools plus its own copy of the web app, see [RELEASES.md](RELEASES.md)) in `%USERPROFILE%\LDRAW-NOVA` (or a folder you pick), then builds the app. The first build takes 15 to 40 minutes and about 5 GB; the image brings its own LDraw library. |
 | **Terminal** | Claude Code and/or OpenAI Codex (GPT) in a command window, driving `./ldraw-agent` directly. | WSL with Ubuntu, then everything below inside it, using your own LDraw folder (picked or detected, copied into Linux for speed). |
 | **Both** | Both of the above. | |
 
 Desktop shortcuts: **LDRAW-NOVA** starts the web app and opens it in your browser, **Stop LDRAW-NOVA** stops it, **LDRAW-NOVA models** opens its data folder; terminal mode adds **LDRAW-NOVA Claude (terminal)** and/or **LDRAW-NOVA GPT (terminal)** plus **LDRAW-NOVA files**. If WSL or Docker Desktop is new, the installer tells you when to restart; then double-click it again and it continues. From PowerShell, the same installer runs with:
 
 ```powershell
-irm https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/master/install.ps1 | iex
 ```
 
 **macOS, Linux or WSL** (terminal mode; needs Homebrew on macOS). Checks every requirement and installs what is missing (git, uv, Python 3.12, Poppler, LeoCAD 23.03+, Claude Code and/or Codex), clones the repository, points it at your LDraw library, runs `./setup.sh` and a test build. Running it again is safe.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/master/install.sh | bash
 ```
 
 **Updating.** Double-click **Update LDRAW-NOVA** (terminal mode: **Update LDRAW-NOVA (terminal)**). For the web app it downloads the newest release (the web app and the tools always come from the same release, since newer tools code can break an older web app) and builds it while the current one keeps running; if the build fails, nothing changes. Your chats, models and logins are kept, and only changed Docker layers rebuild, so an update usually takes minutes. The previous three versions are saved: **Revert LDRAW-NOVA update** lists them and switches back instantly, and running it again returns you to the version you left. In terminal mode, Revert steps back one update at a time and Update brings you forward again. On macOS or Linux, run `~/.local/share/ldraw-nova/install.sh --update` or `--revert` (add `--dir` if you installed elsewhere); terminal mode refuses to update over edited tracked files.
@@ -94,7 +94,7 @@ Semantic reference search uses [jev-rerank](https://github.com/anteloc/jev-reran
 
 ## Run the web app
 
-The web app and Docker configuration live in the sibling [ldraw-nova-docker](https://github.com/anteloc/ldraw-nova-docker) repository. Install Git and Docker, then clone matching release tags side by side:
+The Windows installer sets this up for you from this repository's own release tags (see [RELEASES.md](RELEASES.md)). By hand, the original web app and Docker configuration live in the sibling [ldraw-nova-docker](https://github.com/anteloc/ldraw-nova-docker) repository. Install Git and Docker, then clone matching release tags side by side:
 
 ```sh
 git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova.git

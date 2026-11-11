@@ -11,7 +11,7 @@ echo.
 if exist "%~dp0install.ps1" (
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" -FromBat %*
 ) else (
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $f = Join-Path $env:TEMP 'ldraw-nova-install.ps1'; Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Kerklord/ldraw-nova/master/install.ps1' -OutFile $f; & $f -FromBat; exit $LASTEXITCODE"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $f = Join-Path $env:TEMP 'ldraw-nova-install.ps1'; Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/Kerklord/kls-ldraw-nova/master/install.ps1' -OutFile $f; & $f -FromBat; exit $LASTEXITCODE"
 )
 echo.
 if errorlevel 2 (
