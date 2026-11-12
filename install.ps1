@@ -206,7 +206,7 @@ function Get-ReleaseTags($url) {
 # has the tag, otherwise from the original repository.
 function Resolve-WebRelease($novaUrl, $dockerUrl) {
     if (-not $dockerUrl -and $novaUrl -ne $OriginalRepo) {
-        $tags = Get-ReleaseTags $novaUrl
+        $tags = @(Get-ReleaseTags $novaUrl)   # @(): a single tag would otherwise come back as a plain string
         if ($Release) {
             if ($tags -notcontains $Release) { Fail "$novaUrl has no release $Release. Available: $($tags -join ', ')" }
             $tag = $Release
@@ -219,9 +219,9 @@ function Resolve-WebRelease($novaUrl, $dockerUrl) {
         return @{ Tag = $tag; Nova = $nova; Docker = @{ Url = ""; Bundled = $true; Branch = $tag; Sha = $nova.Sha } }
     }
     if (-not $dockerUrl) { $dockerUrl = $OriginalDockerRepo }
-    $dockerTags = Get-ReleaseTags $dockerUrl
-    $originalTags = Get-ReleaseTags $OriginalRepo
-    $chosenTags = if ($novaUrl -eq $OriginalRepo) { $originalTags } else { Get-ReleaseTags $novaUrl }
+    $dockerTags = @(Get-ReleaseTags $dockerUrl)
+    $originalTags = @(Get-ReleaseTags $OriginalRepo)
+    $chosenTags = if ($novaUrl -eq $OriginalRepo) { $originalTags } else { @(Get-ReleaseTags $novaUrl) }
     if ($Release) {
         if ($dockerTags -notcontains $Release) { Fail "The web app has no release $Release. Available: $($dockerTags -join ', ')" }
         $tag = $Release
@@ -646,7 +646,7 @@ if ($wantWeb) {
     $webRoot = $WebDir
     if (-not $webRoot) {
         $webRoot = Join-Path $env:USERPROFILE "LDRAW-NOVA"
-        if (-not (Confirm-Choice "Install the web app in $webRoot?")) {
+        if (-not (Confirm-Choice "Install the web app in ${webRoot}?")) {
             Write-Host "  A window will open. Pick where the 'LDRAW-NOVA' folder should be created."
             $parent = Select-Folder "Pick where to create the 'LDRAW-NOVA' folder"
             if ($null -eq $parent) { Fail "No folder selected." }
