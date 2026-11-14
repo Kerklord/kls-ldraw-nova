@@ -189,7 +189,10 @@ function Get-RepoInfo($url, $ref) {
 # Release tags (v1.2.3) of a GitHub repository, newest first.
 function Get-ReleaseTags($url) {
     $owner, $name = Split-RepoUrl $url
-    $tags = @(Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name/tags?per_page=100" -Headers $GitHubHeaders)
+    # Windows PowerShell 5.1 returns a JSON array as ONE pipeline object, so @(...) around the call
+    # would hold the whole array as a single item and "$_.name" would join every tag name into one
+    # string. Store it first: piping a variable enumerates its items (a lone object passes as is).
+    $tags = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name/tags?per_page=100" -Headers $GitHubHeaders
     $names = @($tags | ForEach-Object { [string]$_.name } | Where-Object { $_ -match '^v\d+(\.\d+){1,3}$' })
     return @($names | Sort-Object { [version]($_.Substring(1)) } -Descending)
 }
@@ -540,9 +543,16 @@ function Invoke-Maintenance {
     }
     try {
         if ($Update) { Update-WebApp $root } else { Undo-WebUpdate $root }
+    } catch {
+        # Show the reason before "Press Enter to close"; otherwise it only appears as the window closes.
+        Write-Host ""
+        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+        if ($Yes -or $FromBat) { throw }
+        $script:MaintenanceFailed = $true
     } finally {
         if (-not $Yes -and -not $FromBat) { Read-Host "Press Enter to close" | Out-Null }
     }
+    if ($script:MaintenanceFailed) { exit 1 }
 }
 
 function Main {
