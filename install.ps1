@@ -189,7 +189,10 @@ function Get-RepoInfo($url, $ref) {
 # Release tags (v1.2.3) of a GitHub repository, newest first.
 function Get-ReleaseTags($url) {
     $owner, $name = Split-RepoUrl $url
-    $tags = @(Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name/tags?per_page=100" -Headers $GitHubHeaders)
+    # Windows PowerShell 5.1 returns a JSON array as ONE pipeline object, so @(...) around the call
+    # would hold the whole array as a single item and "$_.name" would join every tag name into one
+    # string. Store it first: piping a variable enumerates its items (a lone object passes as is).
+    $tags = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$owner/$name/tags?per_page=100" -Headers $GitHubHeaders
     $names = @($tags | ForEach-Object { [string]$_.name } | Where-Object { $_ -match '^v\d+(\.\d+){1,3}$' })
     return @($names | Sort-Object { [version]($_.Substring(1)) } -Descending)
 }
