@@ -6,6 +6,7 @@
 > (`data/chats`, `data/output`). Changes from v0.6.0:
 >
 > - Chat box: paste images with Ctrl+V (`web/frontend/src/components/Composer.tsx`).
+> - Toolkit tool description lists the alternate-build commands `parts-box`, `parts-match` and `pair-file` (`web/backend/tools.py`).
 
 # ldraw-nova-docker
 

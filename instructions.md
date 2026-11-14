@@ -24,6 +24,7 @@ Read:
 - For Technic structures or a Technic skeleton supporting a System body, [Technic structural workflow](docs/agent/technic.md) and [structural atlas](examples/technic-atlas/README.md). Stage 1 covers fixed assemblies, seating, bracing and mounts.
 - For models with mechanisms, follow the [mechanism workflow](docs/agent/mechanisms.md) and [mechanism atlas](examples/mechanism-atlas/README.md). Stage 2 is authorized for construction from studied examples; analytical mechanism verification is deferred by the user. Read the build pages, preserve parent context, describe intended operation and adapt the source.
 - [Tool reference](docs/agent/tooling.md) and [validation guide](docs/agent/validation.md).
+- When the user wants two or more models from the same parts (alternate builds, 3-in-1, "rebuild it into"), follow the [alternate builds workflow](docs/agent/multi-set.md): build 1 sets the box, later builds must match it (`parts-box`, `parts-match`), and two builds get a Better Destruction pairing file (`pair-file`).
 - For complex work, [module workflow and Bookshop case study](docs/agent/complex-models.md), [measured reference inventory](docs/agent/resources/bookshop-study.json), and [Copper Lane example](examples/modular-street/README.md).
 
 The language authority is the mandatory [docs/ldraw-specs.pdf](docs/ldraw-specs.pdf). Use `./ldraw-agent spec --page 65` or `./ldraw-agent spec 'INVERTNEXT'`; the [source map](docs/agent/specification-map.md) identifies relevant pages. Distinguish official part-authoring rules from personal model rules.

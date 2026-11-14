@@ -275,7 +275,8 @@ def _fn(name: str, description: str, properties: dict, required: list[str]) -> d
 TOOLS: dict[str, tuple[dict, Callable[..., Awaitable[ToolResult]]]] = {
     "run_toolkit": (_fn("run_toolkit",
         "Run the standalone LDraw Nova CLI. All commands are available: doctor, spec, discover, catalog, "
-        "study, extract, examples, build, validate, inspect, render, compare-bom, manual, vehicle, spaceship, "
+        "study, extract, examples, build, validate, inspect, render, compare-bom, parts-box, parts-match, pair-file, "
+        "manual, vehicle, spaceship, "
         "technic, mechanism and more. Read instructions.md and relevant docs first. Output goes under output/. "
         "Arguments are an array, without shell quoting or the executable. Use --help to inspect subcommands.",
         {"arguments": {"type": "array", "items": {"type": "string"}},
