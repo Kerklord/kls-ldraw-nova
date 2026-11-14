@@ -319,6 +319,23 @@ def parser():
             c.add_argument("--limit", type=positive, default=50)
             c.add_argument("--offset", type=int, default=0)
             c.add_argument("--max-instances", type=positive, default=100000)
+    c = commands.add_parser("parts-box", help="Save a build's (or parts list's) parts as a box for alternate builds")
+    c.add_argument("source", help=".mpd/.ldr build, JSON plan, bom report, or CSV with part,colour,quantity")
+    c.add_argument("--output", required=True, help="Box JSON to write")
+    c = commands.add_parser("parts-match", help="Check a build uses the same parts as a box (another build or a parts list)")
+    c.add_argument("build", help=".mpd/.ldr build or JSON plan")
+    c.add_argument("--box", required=True, help="The other build, a parts-box JSON, a bom report or a CSV")
+    c.add_argument("--leftovers", type=int, default=0, help="Box parts allowed to stay unused")
+    c.add_argument("--hidden-percent", type=float, default=10.0, help="Most hidden filler allowed, percent of each build")
+    c.add_argument("--strict", action="store_true", help="Exact counts, no leftovers, no hidden filler")
+    c.add_argument("--report")
+    c = commands.add_parser("pair-file", help="Write a Better Destruction .bdpair.json linking the bricks of two builds")
+    c.add_argument("set1", help="Set 1 .mpd/.ldr (the build that explodes)")
+    c.add_argument("set2", help="Set 2 .mpd/.ldr (the build it turns into)")
+    c.add_argument("--output", required=True, help="NAME.bdpair.json")
+    c.add_argument("--name1")
+    c.add_argument("--name2")
+    c.add_argument("--report")
     c = commands.add_parser("cad-check", help="Run Python validation and a LeoCAD snapshot/BOM import check")
     c.add_argument("file")
     c.add_argument("--timeout", type=positive, default=90)
@@ -667,6 +684,19 @@ def run(args):
         if passed:
             atomic_write(target, text)
         return report, 0 if passed else 1
+    if args.command in {"parts-box", "parts-match", "pair-file"}:
+        from . import multiset
+        if args.command == "parts-box":
+            return multiset.save_box(args.source, parts, args.output), 0
+        if args.command == "parts-match":
+            if args.leftovers < 0 or not 0 <= args.hidden_percent <= 100:
+                raise ValueError("--leftovers must be 0 or more and --hidden-percent 0 to 100")
+            report = multiset.parts_match(args.build, args.box, parts, leftovers=args.leftovers,
+                                          hidden_percent=args.hidden_percent, strict=args.strict)
+            return report, 0 if report["checks_passed"] else 1
+        if not args.output.endswith(".bdpair.json"):
+            raise ValueError("Pairing file must end in .bdpair.json")
+        return multiset.pair_file(args.set1, args.set2, parts, args.output, name1=args.name1, name2=args.name2), 0
     assembly = args.command == "validate" and args.profile == "assembly"
     model, diagnostics = validate_file(args.file, parts, assembly=assembly, section=args.section, colour=args.colour,
                                        instance_limit=getattr(args,"max_instances",100000))

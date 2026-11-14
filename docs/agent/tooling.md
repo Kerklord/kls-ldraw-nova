@@ -214,6 +214,14 @@ For loops, procedural repetition, or matrix composition, use the [Python example
 
 The global `ldraw-render-steps.sh` is also useful during construction. Read its current help with no arguments, select a submodel and step range, then render several viewpoints to expose misplaced parts, concealed gaps or awkward layering. Open the images, fix the source plan/generator and render again. The [build-page guide](build-manuals.md#inspect-a-model-during-construction) covers this review loop and the richer `manual prepare` workflow for atlas studies. All rendering calls use the `leocad` CLI on `PATH`.
 
+## Alternate builds from the same parts
+
+See the [alternate builds workflow](multi-set.md).
+
+- `parts-box SOURCE --output box.json` saves the parts of a build (`.mpd`, `.ldr`, JSON plan), a `bom` report or a CSV (`part,colour,quantity`) as a box.
+- `parts-match BUILD --box SOURCE [--leftovers N] [--hidden-percent P] [--strict]` compares a build or plan with a box (another build, a box file, a `bom` report or a CSV). It lists `missing` and `leftovers` and counts hidden filler (parts inside a section whose FILE name contains `hidden`). Exit 0 when nothing is missing, leftovers are at most N (default 0) and hidden filler is at most P% of each build (default 10).
+- `pair-file SET1 SET2 --output NAME.bdpair.json [--name1 A --name2 B]` writes the Better Destruction pairing file: one entry per physical brick with its position, rotation and centre in each set, set 2's bottom-up build order and the hidden flag.
+
 ## Automation contract
 
 Reports are JSON. Exit **0** means the selected command/checks completed successfully; **1** means validation/coverage failed (or warnings failed under `--strict`); **2** means bad input, dependency, I/O, conversion, budget, or execution failure. Read `diagnostics`, `complete`, truncation flags, and `physical_validity`, not just the exit code. `study` is informational: read `source_checks_passed`. `extract` can write a failing review artifact with exit 1. Empty search results are a successful empty query. `--report` writes a report in addition to stdout. Do not use a shell pipeline that loses the first command's exit status.
