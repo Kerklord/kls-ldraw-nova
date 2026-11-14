@@ -540,9 +540,16 @@ function Invoke-Maintenance {
     }
     try {
         if ($Update) { Update-WebApp $root } else { Undo-WebUpdate $root }
+    } catch {
+        # Show the reason before "Press Enter to close"; otherwise it only appears as the window closes.
+        Write-Host ""
+        Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+        if ($Yes -or $FromBat) { throw }
+        $script:MaintenanceFailed = $true
     } finally {
         if (-not $Yes -and -not $FromBat) { Read-Host "Press Enter to close" | Out-Null }
     }
+    if ($script:MaintenanceFailed) { exit 1 }
 }
 
 function Main {
